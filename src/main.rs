@@ -8,7 +8,7 @@ enum DestinationLanguage {
 }
 
 impl Generator for DestinationLanguage {
-    fn generate(&self, spec: &oas3::Spec) -> Vec<(std::path::PathBuf, String)> {
+    fn generate(&self, spec: &oas3::Spec) -> Vec<File> {
         let generator = match self {
             DestinationLanguage::Dart => DartGenerator,
         };
@@ -25,21 +25,28 @@ impl std::fmt::Display for DestinationLanguage {
     }
 }
 
-async fn fetch_spec_json() -> Result<String, reqwest::Error> {
-    let url = "https://api.dev.blingcard.app/openapi?openapiSecret=a1baba99-9ce8-4578-a1a3-704b9cfad928";
-    let response = reqwest::get(url).await?;
-    let body = response.text().await?;
+async fn fetch_spec_json(url: &str) -> Result<String, reqwest::Error> {
+    // let response = reqwest::get(url).await?;
+    // let body = response.text().await?;
+    // Ok(body)
+    let body = std::fs::read_to_string("openapi.json").unwrap();
     Ok(body)
 }
 
 #[tokio::main]
 async fn main() {
 
+    //TODO: get spec url from args
+    let spec_url = "https://api.dev.blingcard.app/openapi?openapiSecret=a1baba99-9ce8-4578-a1a3-704b9cfad928";
+
+    //TODO: get dest out-dir from args
+    let out_dir = std::path::PathBuf::from("out");
+
     //TODO: get destination language from args
     let destination_language = DestinationLanguage::Dart;
 
     println!("getting spec");
-    let json = match fetch_spec_json().await {
+    let json = match fetch_spec_json(&spec_url).await {
         Ok(json) => json,
         Err(e) => {
             println!("fetching spec error: {:?}", e);
@@ -61,8 +68,15 @@ async fn main() {
         return;
     }
     println!("writing files");
+    // start from scratch, i.e. rm -rf out_dir
+    let _ = std::fs::remove_dir_all(&out_dir);
     for file in files {
-        println!("writing {:}", file.0.display());
-        std::fs::write(file.0, file.1).unwrap();
+        let path = out_dir.join(&file.path);
+        // Create parent directories if they don't exist
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        println!("writing {:}", path.display());
+        std::fs::write(path, file.content).unwrap();
     }
 }
