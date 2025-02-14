@@ -38,7 +38,7 @@ impl fmt::Display for NnDt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             NnDt::Builtin(dt) => write!(f, "{}", dt),
-            NnDt::Union(dt) => write!(f, "todo"),
+            NnDt::Union(_) => write!(f, "UnionType"),
         }
     }
 }

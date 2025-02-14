@@ -56,64 +56,14 @@ impl<'a> SchemaAdder<'a> {
         format!("{}{}Scheme", self.class_prefix, name)
     }
 
-    fn single_scheme_type_to_dart_type(&self, schema_type: &oas3spec::SchemaType) -> types::BiDt {
-        type OaSt = oas3spec::SchemaType;
-        use types::*;
-        match schema_type {
-            OaSt::String => BiDt::String,
-            OaSt::Number => BiDt::Number,
-            OaSt::Boolean => BiDt::Boolean,
-            OaSt::Integer => BiDt::Integer,
-            OaSt::Object => BiDt::Object,
-            OaSt::Array => BiDt::List(Box::new(Dt::Normal(NnDt::Builtin(BiDt::Object)))),
-            OaSt::Null => BiDt::Never,
-        }
-    }
-
-    fn scheme_type_to_dart_type(&self, schema_type: &oas3spec::SchemaTypeSet) -> types::Dt {
-        type OaSt = oas3spec::SchemaTypeSet;
-        use types::*;
-        match schema_type {
-            OaSt::Single(schema_type) => {
-                let inner = self.single_scheme_type_to_dart_type(schema_type);
-                Dt::Normal(NnDt::Builtin(inner))
-            }
-            OaSt::Multiple(schema_types) => {
-                let builtins = schema_types
-                    .iter()
-                    .map(|t| self.single_scheme_type_to_dart_type(t))
-                    .collect::<Vec<types::BiDt>>();
-                // check if inner contains BiDt::Never
-                if builtins.contains(&BiDt::Never) {
-                    // remove BiDt::Never from inner
-                    let mut non_null_types = Vec::new();
-                    for t in builtins {
-                        if t != BiDt::Never {
-                            non_null_types.push(NnDt::Builtin(t));
-                        }
-                    }
-                    let inner = if non_null_types.len() == 1 {
-                        non_null_types.swap_remove(0)
-                    } else {
-                        NnDt::Union(non_null_types)
-                    };
-                    Dt::Nullable(inner)
-                } else {
-                    let unwrapped = builtins.into_iter().map(|t| NnDt::Builtin(t)).collect();
-                    Dt::Normal(NnDt::Union(unwrapped))
-                }
-            }
-        }
-    }
-
     fn mk_union_type_string(&self, name: &str, inner: &Vec<types::NnDt>) -> UnionTypeString {
         let class_name = format!("{}UnionType", self.scheme_name_to_type(name));
         let mut prefix = String::new();
         prefix.push_str(&format!("sealed class {} {{}}\n", class_name));
-        for t in inner {
+        for (idx, t) in inner.iter().enumerate() {
             prefix.push_str(&format!(
-                "class {}{} extends {}{{}}",
-                class_name, t, class_name
+                "class {}{}{} extends {}{{}}",
+                class_name, t, idx, class_name
             ));
         }
         UnionTypeString {
@@ -121,7 +71,12 @@ impl<'a> SchemaAdder<'a> {
             prefix,
         }
     }
-    fn mk_schema_file(&self, name: &str, scheme: &oas3spec::ObjectSchema, depth: usize) -> (String, Vec<File>) {
+    fn mk_schema_file(
+        &self,
+        name: &str,
+        scheme: &oas3spec::ObjectSchema,
+        depth: usize,
+    ) -> (String, Vec<File>) {
         let mut depends_on_files = Vec::new();
         let mut content = String::new();
         let mut prefix_content = String::new();
@@ -145,36 +100,28 @@ impl<'a> SchemaAdder<'a> {
                                 }
                             };
 
-                            let dart_type = self.scheme_type_to_dart_type(schema_type);
+                            let dart_type = scheme_type_to_dart_type(schema_type);
 
-                            constructor_content.push_str(&format!(
-                                "    {}this.{},\n",
-                                match dart_type {
-                                    Dt::Normal(_) => "required ",
-                                    Dt::Nullable(_) => "",
-                                },
-                                p_name
-                            ));
+                            add_to_constructor_content(
+                                &mut constructor_content,
+                                p_name,
+                                matches!(dart_type, Dt::Normal(_)),
+                            );
 
                             let dt_str = match dart_type {
                                 Dt::Normal(dt) => inner_str(&dt),
                                 Dt::Nullable(dt) => format!("{}?", inner_str(&dt)),
                             };
-                            content.push_str(&format!("  final {} {};\n", dt_str, p_name));
+                            add_to_member_content(&mut content, p_name, &dt_str);
                         } else {
                             depends_on_files.push(File {
-                                path: std::path::PathBuf::from(format!(
-                                    "{}/{}.dart",
-                                    name, p_name
-                                )),
+                                path: std::path::PathBuf::from(format!("{}/{}.dart", name, p_name)),
                                 content: self.mk_schema_file(p_name, p_scheme, depth + 1).0,
                             });
-                            content.push_str(&format!(
-                                "  final {} {};\n",
-                                self.scheme_name_to_type(p_name),
-                                p_name
-                            ));
-                            constructor_content.push_str(&format!("\t\trequired this.{},\n", p_name));
+
+                            let dt_str = self.scheme_name_to_type(p_name);
+                            add_to_constructor_content(&mut constructor_content, p_name, true);
+                            add_to_member_content(&mut content, p_name, &dt_str);
                         }
                     }
                     oas3spec::ObjectOrReference::Ref { ref_path } => {
@@ -193,5 +140,67 @@ impl<'a> SchemaAdder<'a> {
         ret_str.push_str(&constructor_content);
         ret_str.push_str(&format!("}}\n"));
         (ret_str, depends_on_files)
+    }
+}
+
+fn add_to_constructor_content(content: &mut String, name: &str, is_required: bool) {
+    content.push_str(&format!(
+        "    {}this.{},\n",
+        if is_required { "required " } else { "" },
+        name
+    ));
+}
+
+fn add_to_member_content(content: &mut String, name: &str, type_str: &str) {
+    content.push_str(&format!("    final {} {};\n", type_str, name));
+}
+
+fn scheme_type_to_dart_type(schema_type: &oas3spec::SchemaTypeSet) -> types::Dt {
+    type OaSt = oas3spec::SchemaTypeSet;
+    use types::*;
+    match schema_type {
+        OaSt::Single(schema_type) => {
+            let inner = single_scheme_type_to_dart_type(schema_type);
+            Dt::Normal(NnDt::Builtin(inner))
+        }
+        OaSt::Multiple(schema_types) => {
+            let builtins = schema_types
+                .iter()
+                .map(|t| single_scheme_type_to_dart_type(t))
+                .collect::<Vec<types::BiDt>>();
+            // check if inner contains BiDt::Never
+            if builtins.contains(&BiDt::Never) {
+                // remove BiDt::Never from inner
+                let mut non_null_types = Vec::new();
+                for t in builtins {
+                    if t != BiDt::Never {
+                        non_null_types.push(NnDt::Builtin(t));
+                    }
+                }
+                let inner = if non_null_types.len() == 1 {
+                    non_null_types.swap_remove(0)
+                } else {
+                    NnDt::Union(non_null_types)
+                };
+                Dt::Nullable(inner)
+            } else {
+                let unwrapped = builtins.into_iter().map(|t| NnDt::Builtin(t)).collect();
+                Dt::Normal(NnDt::Union(unwrapped))
+            }
+        }
+    }
+}
+
+fn single_scheme_type_to_dart_type(schema_type: &oas3spec::SchemaType) -> types::BiDt {
+    type OaSt = oas3spec::SchemaType;
+    use types::*;
+    match schema_type {
+        OaSt::String => BiDt::String,
+        OaSt::Number => BiDt::Number,
+        OaSt::Boolean => BiDt::Boolean,
+        OaSt::Integer => BiDt::Integer,
+        OaSt::Object => BiDt::Object,
+        OaSt::Array => BiDt::List(Box::new(Dt::Normal(NnDt::Builtin(BiDt::Object)))),
+        OaSt::Null => BiDt::Never,
     }
 }
