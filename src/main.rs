@@ -2,7 +2,6 @@ mod generate;
 use generate::*;
 
 
-
 enum DestinationLanguage {
     Dart,
 }

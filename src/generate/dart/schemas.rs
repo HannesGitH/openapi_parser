@@ -57,12 +57,12 @@ impl<'a> SchemaAdder<'a> {
     }
 
     fn mk_union_type_string(&self, name: &str, inner: &Vec<types::NnDt>) -> UnionTypeString {
-        let class_name = format!("{}UnionType", self.scheme_name_to_type(name));
+        let class_name = format!("{}UnionType", name);
         let mut prefix = String::new();
         prefix.push_str(&format!("sealed class {} {{}}\n", class_name));
         for (idx, t) in inner.iter().enumerate() {
             prefix.push_str(&format!(
-                "class {}{}{} extends {}{{}}",
+                "class {}{}{} extends {}{{}}\n",
                 class_name, t, idx, class_name
             ));
         }
@@ -83,35 +83,51 @@ impl<'a> SchemaAdder<'a> {
         let mut constructor_content = String::new();
         let class_name = self.scheme_name_to_type(name);
         // prefix_content.push_str(&format!("import '{0}schemes.dart';\n\n", "../".repeat(depth)));
+        // let any_of_name = String::from("any_of");
         content.push_str(&format!("\nclass {} {{\n", class_name));
-        if !scheme.properties.is_empty() {
+        let properties = &scheme
+            .properties;
+            // .iter()
+            // .chain(scheme.any_of.iter().map(|p| (&any_of_name, p)))
+            // .collect::<Vec<_>>();
+        let iter = properties;
+        if !iter.is_empty() {
             constructor_content.push_str(&format!("  {}({{\n", class_name));
-            for (p_name, p_scheme) in scheme.properties.iter() {
+            for (p_name, p_scheme) in iter.iter() {
                 match p_scheme {
                     oas3spec::ObjectOrReference::Object(p_scheme) => {
-                        use types::*;
                         if let Some(schema_type) = &p_scheme.schema_type {
-                            let mut inner_str = |nn_dt: &NnDt| match nn_dt {
-                                NnDt::Builtin(dt) => format!("{}", dt),
-                                NnDt::Union(inner) => {
-                                    let uts = self.mk_union_type_string(p_name, inner);
-                                    prefix_content.push_str(&uts.prefix);
-                                    uts.name
-                                }
-                            };
-
                             let dart_type = scheme_type_to_dart_type(schema_type);
+
+                            let dt_str = self.create_dart_type_string(
+                                &dart_type,
+                                &class_name,
+                                &mut prefix_content,
+                            );
 
                             add_to_constructor_content(
                                 &mut constructor_content,
                                 p_name,
-                                matches!(dart_type, Dt::Normal(_)),
+                                matches!(dart_type, types::Dt::Normal(_)),
                             );
 
-                            let dt_str = match dart_type {
-                                Dt::Normal(dt) => inner_str(&dt),
-                                Dt::Nullable(dt) => format!("{}?", inner_str(&dt)),
-                            };
+                            add_to_member_content(&mut content, p_name, &dt_str);
+                        } else if !p_scheme.any_of.is_empty() {
+                            let list = &p_scheme.any_of;
+                            let scheme_types = list.iter().map(|obj_or_ref| match obj_or_ref {
+                                oas3spec::ObjectOrReference::Object(obj) => match &obj.schema_type {
+                                    Some(schema_type) => match schema_type {
+                                        oas3spec::SchemaTypeSet::Single(schema_type) => schema_type.clone(),
+                                        _ => panic!("Multiple schema types not supported in any_of"),
+                                    },
+                                    None => panic!("No schema type found in any_of"),
+                                },
+                                _ => panic!("References not supported in any_of")
+                            }).collect::<Vec<_>>();
+                            let dt = multiple_scheme_type_to_dart_type(&scheme_types);
+                            let dt_str =
+                                self.create_dart_type_string(&dt, &class_name, &mut prefix_content);
+                            add_to_constructor_content(&mut constructor_content, p_name, true);
                             add_to_member_content(&mut content, p_name, &dt_str);
                         } else {
                             depends_on_files.push(File {
@@ -141,7 +157,31 @@ impl<'a> SchemaAdder<'a> {
         ret_str.push_str(&format!("}}\n"));
         (ret_str, depends_on_files)
     }
+
+    fn create_dart_type_string(
+        &self,
+        dart_type: &types::Dt,
+        parent_type: &str,
+        sealed_class_str_buf: &mut String,
+    ) -> String {
+        use types::*;
+        let mut inner_str = |nn_dt: &NnDt| match nn_dt {
+            NnDt::Builtin(dt) => format!("{}", dt),
+            NnDt::Union(inner) => {
+                let uts = self.mk_union_type_string(parent_type, inner);
+                sealed_class_str_buf.push_str(&uts.prefix);
+                uts.name
+            }
+        };
+        let dt_str = match dart_type {
+            Dt::Normal(dt) => inner_str(&dt),
+            Dt::Nullable(dt) => format!("{}?", inner_str(&dt)),
+        };
+        dt_str
+    }
 }
+
+// SECTION: dart content string builders
 
 fn add_to_constructor_content(content: &mut String, name: &str, is_required: bool) {
     content.push_str(&format!(
@@ -155,6 +195,8 @@ fn add_to_member_content(content: &mut String, name: &str, type_str: &str) {
     content.push_str(&format!("    final {} {};\n", type_str, name));
 }
 
+// SECTION: type conversion
+
 fn scheme_type_to_dart_type(schema_type: &oas3spec::SchemaTypeSet) -> types::Dt {
     type OaSt = oas3spec::SchemaTypeSet;
     use types::*;
@@ -163,31 +205,34 @@ fn scheme_type_to_dart_type(schema_type: &oas3spec::SchemaTypeSet) -> types::Dt 
             let inner = single_scheme_type_to_dart_type(schema_type);
             Dt::Normal(NnDt::Builtin(inner))
         }
-        OaSt::Multiple(schema_types) => {
-            let builtins = schema_types
-                .iter()
-                .map(|t| single_scheme_type_to_dart_type(t))
-                .collect::<Vec<types::BiDt>>();
-            // check if inner contains BiDt::Never
-            if builtins.contains(&BiDt::Never) {
-                // remove BiDt::Never from inner
-                let mut non_null_types = Vec::new();
-                for t in builtins {
-                    if t != BiDt::Never {
-                        non_null_types.push(NnDt::Builtin(t));
-                    }
-                }
-                let inner = if non_null_types.len() == 1 {
-                    non_null_types.swap_remove(0)
-                } else {
-                    NnDt::Union(non_null_types)
-                };
-                Dt::Nullable(inner)
-            } else {
-                let unwrapped = builtins.into_iter().map(|t| NnDt::Builtin(t)).collect();
-                Dt::Normal(NnDt::Union(unwrapped))
+        OaSt::Multiple(schema_types) => multiple_scheme_type_to_dart_type(schema_types),
+    }
+}
+
+fn multiple_scheme_type_to_dart_type(schema_types: &Vec<oas3spec::SchemaType>) -> types::Dt {
+    use types::*;
+    let builtins = schema_types
+        .iter()
+        .map(|t| single_scheme_type_to_dart_type(t))
+        .collect::<Vec<types::BiDt>>();
+    // check if inner contains BiDt::Never
+    if builtins.contains(&BiDt::Never) {
+        // remove BiDt::Never from inner
+        let mut non_null_types = Vec::new();
+        for t in builtins {
+            if t != BiDt::Never {
+                non_null_types.push(NnDt::Builtin(t));
             }
         }
+        let inner = if non_null_types.len() == 1 {
+            non_null_types.swap_remove(0)
+        } else {
+            NnDt::Union(non_null_types)
+        };
+        Dt::Nullable(inner)
+    } else {
+        let unwrapped = builtins.into_iter().map(|t| NnDt::Builtin(t)).collect();
+        Dt::Normal(NnDt::Union(unwrapped))
     }
 }
 
