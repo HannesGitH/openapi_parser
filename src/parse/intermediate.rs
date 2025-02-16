@@ -1,5 +1,5 @@
 mod types;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use oas3::spec::*;
 use types::*;
@@ -36,7 +36,30 @@ fn parse_schema(schema: &ObjectOrReference<ObjectSchema>) -> Result<IAST, Error>
 }
 
 fn parse_object(object: &ObjectSchema) -> Result<IAST, Error> {
-    let prim_type_parse = |typ: &SchemaType| {
+    let parse_properties = || {
+        Ok(IAST::Object(AnnotatedObj {
+            nullable: false,
+            is_deprecated: object.deprecated.unwrap_or(false),
+            description: object.description.as_deref(),
+            title: object.title.as_deref(),
+            value: AlgType::Product(
+                match object
+                    .properties
+                    .iter()
+                    .map(|(name, schema)| match parse_schema(schema) {
+                        Ok(obj) => Ok((name.as_str(), obj)),
+                        Err(e) => Err(e),
+                    })
+                    .collect::<Result<HashMap<_, _>, _>>()
+                {
+                    Ok(types) => types,
+                    Err(e) => return Err(e),
+                },
+            ),
+        }))
+    };
+
+    let parse_prim_type = |typ: &SchemaType| {
         let enum_values = if let Some(const_value) = &object.const_value {
             Some(vec![const_value.to_string()])
         } else if !object.enum_values.is_empty() {
@@ -54,9 +77,21 @@ fn parse_object(object: &ObjectSchema) -> Result<IAST, Error> {
             SchemaType::String => Primitive::String,
             SchemaType::Null => Primitive::Never,
             //TODO: maybe parse properties here
-            SchemaType::Object => unreachable!(),
+            SchemaType::Object => match parse_properties() {
+                Ok(obj) => Primitive::Map(Box::new(obj)),
+                Err(e) => {
+                    println!("error parsing object: {:?}", e);
+                    Primitive::Dynamic
+                }
+            },
             //TODO: maybe parse properties or items here
-            SchemaType::Array => unreachable!(),
+            SchemaType::Array => match parse_properties() {
+                Ok(obj) => Primitive::List(Box::new(obj)),
+                Err(e) => {
+                    println!("error parsing array: {:?}", e);
+                    Primitive::Dynamic
+                }
+            },
         }
     };
     // if type is set, we can return a primitive type
@@ -68,9 +103,9 @@ fn parse_object(object: &ObjectSchema) -> Result<IAST, Error> {
                 description: object.description.as_deref(),
                 title: object.title.as_deref(),
                 value: match types {
-                    SchemaTypeSet::Single(typ) => prim_type_parse(typ),
+                    SchemaTypeSet::Single(typ) => parse_prim_type(typ),
                     // multiple types are currently not supported, so we just take the first non-null one
-                    SchemaTypeSet::Multiple(types) => prim_type_parse(
+                    SchemaTypeSet::Multiple(types) => parse_prim_type(
                         types
                             .iter()
                             .filter(|typ| typ != &&SchemaType::Null)
@@ -115,31 +150,20 @@ fn parse_object(object: &ObjectSchema) -> Result<IAST, Error> {
 
     // 2:
     if !object.properties.is_empty() {
-        return Ok(IAST::Object(AnnotatedObj {
-            nullable: false,
-            is_deprecated: object.deprecated.unwrap_or(false),
-            description: object.description.as_deref(),
-            title: object.title.as_deref(),
-            value: AlgType::Product(
-                match object
-                    .properties
-                    .iter()
-                    .map(|(name, schema)| match parse_schema(schema) {
-                        Ok(obj) => Ok((name.as_str(), obj)),
-                        Err(e) => Err(e),
-                    })
-                    .collect::<Result<HashMap<_, _>, _>>()
-                {
-                    Ok(types) => types,
-                    Err(e) => return Err(e),
-                },
-            ),
-        }));
+        return parse_properties();
     }
 
-    Err(Error::ParseError(
-        "no properties or union types".to_string(),
-    ))
+    //TODO: hmm
+    Ok(IAST::Primitive(AnnotatedObj {
+        nullable: true,
+        is_deprecated: object.deprecated.unwrap_or(false),
+        description: object.description.as_deref(),
+        title: match &object.title {
+            Some(title) => Some(title.as_str()),
+            None => Some("Couldn't parse Object"),
+        },
+        value: Primitive::Dynamic,
+    }))
 
     // AnnotatedObj {
     //     nullable: object.nullable,

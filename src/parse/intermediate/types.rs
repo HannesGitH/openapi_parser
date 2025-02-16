@@ -45,4 +45,5 @@ pub enum Primitive<'a> {
     List(Box<IAST<'a>>),
     Map(Box<IAST<'a>>),
     Enum(Vec<String>),
+    Dynamic,
 }
