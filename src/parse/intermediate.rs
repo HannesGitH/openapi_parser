@@ -1,5 +1,5 @@
 pub mod types;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use oas3::spec::*;
 pub use types::*;
@@ -36,21 +36,37 @@ fn parse_schema(schema: &ObjectOrReference<ObjectSchema>) -> Result<IAST, Error>
 }
 
 fn parse_object(object: &ObjectSchema) -> Result<IAST, Error> {
-    let parse_properties = || {
+
+    let parse_properties = |parse_items_instead: bool| {
+        let iterable = 
+            if parse_items_instead {
+                object
+                    .items
+                    .iter()
+                    .enumerate()
+                    .map(|(i, item)| (i.to_string(), item.as_ref()))
+                    .collect::<BTreeMap<_, _>>()
+            } else {
+                object
+                    .properties
+                    .iter()
+                    .map(|(name, schema)| (name.to_string(), schema))
+                    .collect::<BTreeMap<_, _>>()
+            }
+        ;
         Ok(IAST::Object(AnnotatedObj {
             nullable: false,
             is_deprecated: object.deprecated.unwrap_or(false),
             description: object.description.as_deref(),
             title: object.title.as_deref(),
             value: AlgType::Product(
-                match object
-                    .properties
-                    .iter()
-                    .map(|(name, schema)| match parse_schema(schema) {
-                        Ok(obj) => Ok((name.as_str(), obj)),
-                        Err(e) => Err(e),
-                    })
-                    .collect::<Result<HashMap<_, _>, _>>()
+                match iterable
+                .iter()
+                .map(|(name, schema)| match parse_schema(schema) {
+                    Ok(obj) => Ok((name.as_str(), obj)),
+                    Err(e) => Err(e),
+                })
+                .collect::<Result<HashMap<_, _>, _>>()
                 {
                     Ok(types) => types,
                     Err(e) => return Err(e),
@@ -77,15 +93,14 @@ fn parse_object(object: &ObjectSchema) -> Result<IAST, Error> {
             SchemaType::String => Primitive::String,
             SchemaType::Null => Primitive::Never,
             //TODO: maybe parse properties here
-            SchemaType::Object => match parse_properties() {
+            SchemaType::Object => match parse_properties(false) {
                 Ok(obj) => Primitive::Map(Box::new(obj)),
                 Err(e) => {
                     println!("error parsing object: {:?}", e);
                     Primitive::Dynamic
                 }
             },
-            //TODO: maybe parse properties or items here
-            SchemaType::Array => match parse_properties() {
+            SchemaType::Array => match parse_properties(true) {
                 Ok(obj) => Primitive::List(Box::new(obj)),
                 Err(e) => {
                     println!("error parsing array: {:?}", e);
@@ -153,7 +168,7 @@ fn parse_object(object: &ObjectSchema) -> Result<IAST, Error> {
 
     // 2:
     if !object.properties.is_empty() {
-        return parse_properties();
+        return parse_properties(false);
     }
 
     //TODO: hmm
