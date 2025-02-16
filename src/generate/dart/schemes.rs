@@ -204,7 +204,7 @@ impl<'a> SchemeAdder<'a> {
             content.push_str(&format!("\t\tt_{} => '{}',\n", enum_value, orig_value));
         }
         content.push_str(&format!(
-            "\t}};\n\tfactory {}fromJson(dynamic json) => switch(json) {{\n",
+            "\t}};\n\tfactory {}.fromJson(dynamic json) => switch(json) {{\n",
             class_name
         ));
         for (orig_value, enum_value) in allowed_values_str.iter() {
