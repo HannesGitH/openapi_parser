@@ -1,6 +1,7 @@
 mod generate;
 use generate::*;
 
+mod parse;
 
 enum DestinationLanguage {
     Dart,
@@ -57,6 +58,14 @@ async fn main() {
         Ok(spec) => spec,
         Err(e) => {
             println!("parsing spec error: {:?}", e);
+            return;
+        }
+    };
+    println!("parsing spec to intermediate");
+    let intermediate = match parse::intermediate::parse(&spec) {
+        Ok(intermediate) => intermediate,
+        Err(e) => {
+            println!("parsing spec to intermediate error: {:?}", e);
             return;
         }
     };
