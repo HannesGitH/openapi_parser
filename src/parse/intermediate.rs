@@ -38,36 +38,21 @@ pub fn parse(spec: &oas3::Spec) -> Result<IntermediateFormat, Error> {
                     description: route.description.as_deref(),
                     endpoints: {
                         let mut endpoints = Vec::new();
-                        {
-                            if let Some(endpoint) = &route.get {
-                                // let parser: &Parser = &parser;
-                                (&mut endpoints).push(Endpoint {
-                                    method: (Method::Get),
-                                    description: endpoint.description.as_deref(),
-                                    params: parse_params(&endpoint.parameters).ok(),
-                                    request: parse_request(
-                                        &endpoint.request_body.as_ref().unwrap(),
-                                    )
-                                    .unwrap(),
-                                    responses: parse_responses(&endpoint.responses.as_ref().unwrap()).unwrap(),
-                                });
-                            }
+
+                        let parser = macros::EndpointParser {
+                            params_parser: Box::new(parse_params),
+                            request_parser: Box::new(parse_request),
+                            responses_parser: Box::new(parse_responses),
                         };
-                        handle_endpoint!(
-                            &parser,
-                            &mut endpoints,
-                            &route.post,
-                            Method::Post,
-                            parse_params,
-                            parse_request,
-                            parse_responses
-                        );
-                        // handle_endpoint!(&parser, &mut endpoints, &route.put, Method::Put);
-                        // handle_endpoint!(&parser, &mut endpoints, &route.delete, Method::Delete);
-                        // handle_endpoint!(&parser, &mut endpoints, &route.patch, Method::Patch);
-                        // handle_endpoint!(&parser, &mut endpoints, &route.options, Method::Options);
-                        // handle_endpoint!(&parser, &mut endpoints, &route.head, Method::Head);
-                        // handle_endpoint!(&parser, &mut endpoints, &route.trace, Method::Trace);
+
+                        handle_endpoint!(&parser, &mut endpoints, &route.get, Method::Get);
+                        handle_endpoint!(&parser, &mut endpoints, &route.post, Method::Post);
+                        handle_endpoint!(&parser, &mut endpoints, &route.put, Method::Put);
+                        handle_endpoint!(&parser, &mut endpoints, &route.delete, Method::Delete);
+                        handle_endpoint!(&parser, &mut endpoints, &route.patch, Method::Patch);
+                        handle_endpoint!(&parser, &mut endpoints, &route.options, Method::Options);
+                        handle_endpoint!(&parser, &mut endpoints, &route.head, Method::Head);
+                        handle_endpoint!(&parser, &mut endpoints, &route.trace, Method::Trace);
 
                         endpoints
                     },
