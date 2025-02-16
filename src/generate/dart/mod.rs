@@ -3,7 +3,6 @@ mod readme;
 
 use crate::parse::intermediate;
 
-mod types;
 mod schemes;
 
 impl super::Generator for DartGenerator {
