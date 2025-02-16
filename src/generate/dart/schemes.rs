@@ -62,17 +62,19 @@ impl<'a> SchemeAdder<'a> {
     ) -> (String, Vec<File>) {
         match iast {
             intermediate::IAST::Object(annotated_obj) => {
-                let doc_str = mk_doc_str(name, annotated_obj);
+                let doc_str = mk_doc_str(name, annotated_obj, 0);
                 let alg_type = &annotated_obj.value;
                 use intermediate::AlgType;
                 match alg_type {
                     AlgType::Sum(sum) => self.generate_sum_type(name, &doc_str, sum, depth),
-                    AlgType::Product(product) => self.generate_product_type(name, &doc_str, product, depth),
+                    AlgType::Product(product) => {
+                        self.generate_product_type(name, &doc_str, product, depth)
+                    }
                 }
             }
             intermediate::IAST::Reference(_) => todo!(),
             intermediate::IAST::Primitive(annotated_obj) => {
-                let doc_str = mk_doc_str(name, annotated_obj);
+                let doc_str = mk_doc_str(name, annotated_obj, 0);
                 (
                     format!(
                         "{}typedef {} = {};",
@@ -134,17 +136,22 @@ impl<'a> SchemeAdder<'a> {
         depth: usize,
     ) -> (String, Vec<File>) {
         let class_name = self.class_name(name);
-        let mut dependencies = Vec::new();
+        let mut file_dependencies = Vec::new();
+        let mut properties = Vec::new();
 
         for (name, iast) in product.iter() {
+            if let intermediate::types::IAST::Primitive(prim) = &iast {
+                properties.push((name, prim));
+                continue;
+            }
             let (content, depends_on_files) =
                 self.parse_named_iast(&format!("{}_{}", name, name), iast, depth + 1);
-            dependencies.push(File {
+            file_dependencies.push(File {
                 path: std::path::PathBuf::from(format!("{}/{}.dart", name, name)),
                 content,
             });
             for f in depends_on_files.into_iter() {
-                dependencies.push(File {
+                file_dependencies.push(File {
                     path: std::path::PathBuf::from(format!("{}/{}", name, f.path.display())),
                     content: f.content,
                 });
@@ -152,27 +159,45 @@ impl<'a> SchemeAdder<'a> {
         }
 
         let mut content = String::new();
-        content.push_str(&format!(
-            "{}class {} {{\n}}",
-            doc_str, class_name
-        ));
-        // TODO add properties
-        (content, dependencies)
+        //TODO: import dependencies
+        content.push_str(&format!("{}class {} {{\n", doc_str, class_name));
+        for (name, prim) in properties.iter() {
+            let prop_doc_str = mk_doc_str(name, &prim, 1);
+            content.push_str(&format!(
+                "\n{}  final {}{} {};\n",
+                prop_doc_str,
+                to_dart_prim(&prim.value),
+                if prim.nullable { "?" } else { "" },
+                name
+            ));
+        }
+        // constructor
+        content.push_str(&format!("\n\n  const {}({{\n", class_name));
+        for (name, prim) in properties.iter() {
+            content.push_str(&format!(
+                "    {}this.{},\n",
+                if !prim.nullable { "required " } else { "" },
+                name
+            ));
+        }
+        content.push_str("  });\n");
+        content.push_str("\n}");
+        (content, file_dependencies)
     }
 }
 
-fn mk_doc_str<T>(name: &str, annotated_obj: &intermediate::AnnotatedObj<T>) -> String {
+fn mk_doc_str<T>(name: &str, annotated_obj: &intermediate::AnnotatedObj<T>, tabs: usize) -> String {
     let mut doc_str = String::new();
-    doc_str.push_str(&format!("/// {}\n", name));
+    doc_str.push_str(&format!("{}/// {}\n", "\t".repeat(tabs), name));
     if let Some(title) = annotated_obj.title {
-        doc_str.push_str(&format!("/// TITLE: {}\n///\n", title));
+        doc_str.push_str(&format!("{}/// TITLE: {}\n", "\t".repeat(tabs), title));
     }
     if let Some(description) = annotated_obj.description {
-        doc_str.push_str(&format!("/// {}\n", description));
+        doc_str.push_str(&format!("{}/// {}\n", "\t".repeat(tabs), description));
     }
     if annotated_obj.is_deprecated {
-        doc_str.push_str("/// DEPRECATED\n");
-        doc_str.push_str("@deprecated\n");
+        doc_str.push_str(&format!("{}/// DEPRECATED\n", "\t".repeat(tabs)));
+        doc_str.push_str(&format!("{}@deprecated\n", "\t".repeat(tabs)));
     }
     doc_str
 }
