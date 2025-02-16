@@ -1,5 +1,5 @@
 pub mod types;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use oas3::spec::*;
 pub use types::*;
@@ -97,24 +97,26 @@ fn parse_object(object: &ObjectSchema) -> Result<IAST, Error> {
     // if type is set, we can return a primitive type
     if let Some(types) = &object.schema_type {
         if types.is_object_or_nullable_object() {
-            return Ok(IAST::Primitive(AnnotatedObj {
-                nullable: types.contains(SchemaType::Null),
-                is_deprecated: object.deprecated.unwrap_or(false),
-                description: object.description.as_deref(),
-                title: object.title.as_deref(),
-                value: match types {
-                    SchemaTypeSet::Single(typ) => parse_prim_type(typ),
-                    // multiple types are currently not supported, so we just take the first non-null one
-                    SchemaTypeSet::Multiple(types) => parse_prim_type(
-                        types
-                            .iter()
-                            .filter(|typ| typ != &&SchemaType::Null)
-                            .collect::<Vec<_>>()
-                            .first()
-                            .unwrap_or(&&SchemaType::Null),
-                    ),
-                },
-            }));
+            let prim_type = match types {
+                SchemaTypeSet::Single(typ) => typ,
+                SchemaTypeSet::Multiple(types) => types
+                .iter()
+                .filter(|typ| typ != &&SchemaType::Null)
+                .collect::<Vec<_>>()
+                .first()
+                .unwrap_or(&&SchemaType::Null),
+            };
+            if prim_type != &SchemaType::Object {
+                let value = parse_prim_type(prim_type);
+                return Ok(IAST::Primitive(AnnotatedObj {
+                    nullable: types.contains(SchemaType::Null),
+                    is_deprecated: object.deprecated.unwrap_or(false),
+                    description: object.description.as_deref(),
+                    title: object.title.as_deref(),
+                    value,
+                }));
+            }
+            // if its an object, we need to parse the properties, so simply continue
         }
     }
     // otherwise we need to parse the object, and return the algebraic type
@@ -157,12 +159,15 @@ fn parse_object(object: &ObjectSchema) -> Result<IAST, Error> {
     Ok(IAST::Primitive(AnnotatedObj {
         nullable: true,
         is_deprecated: object.deprecated.unwrap_or(false),
-        description: object.description.as_deref(),
-        title: match &object.title {
-            Some(title) => Some(title.as_str()),
-            None => Some("Couldn't parse Object"),
+        description: {
+            let desc = &object.description;
+            match desc {
+                Some(desc) => Some(desc.as_str()),
+                None => Some("Couldn't parse Object"),
+            }
         },
-        value: Primitive::Dynamic,
+        title: object.title.as_deref(),
+        value: Primitive::Never,
     }))
 
     // AnnotatedObj {

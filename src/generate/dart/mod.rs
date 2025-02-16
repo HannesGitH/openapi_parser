@@ -9,6 +9,7 @@ mod schemes;
 impl super::Generator for DartGenerator {
     fn generate(&self, spec: &oas3::Spec) -> Result<Vec<super::File>, String> {
         let class_prefix = "API";
+        let class_suffix = "Scheme";
         let mut out = Vec::new();
         readme::add_readme(&mut out, spec);
         println!("parsing spec to intermediate");
@@ -19,7 +20,7 @@ impl super::Generator for DartGenerator {
                 return Err(format!("parsing spec to intermediate error: {:?}", e));
             }
         };
-        schemes::SchemeAdder::new(class_prefix).add_schemes(&mut out, &intermediate);
+        schemes::SchemeAdder::new(class_prefix, class_suffix).add_schemes(&mut out, &intermediate);
         Ok(out)
     }
 }
