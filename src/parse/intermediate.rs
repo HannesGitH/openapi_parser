@@ -29,7 +29,7 @@ pub fn parse(spec: &oas3::Spec) -> Result<IntermediateFormat, Error> {
         });
     }
 
-    let mut routes: Vec<Route> = match &spec.paths {
+    let routes: Vec<Route> = match &spec.paths {
         Some(paths) => {
             let mut routes = Vec::new();
             for (path, route) in paths.iter() {
@@ -75,9 +75,9 @@ fn parse_params(params: &Vec<ObjectOrReference<Parameter>>) -> Result<Vec<Param>
     let mut params: Vec<Param> = Vec::new();
     Ok::<Vec<Param>, Error>(params)
 }
-fn parse_request(request: &ObjectOrReference<RequestBody>) -> Result<IAST, Error> {
+fn parse_request(request: Option<&ObjectOrReference<RequestBody>>) -> Result<IAST, Error> {
     match request {
-        ObjectOrReference::Object(req_body) => {
+        Some(ObjectOrReference::Object(req_body)) => {
             // its application/json only for us
             let scheme = req_body
                 .content
@@ -90,7 +90,8 @@ fn parse_request(request: &ObjectOrReference<RequestBody>) -> Result<IAST, Error
                 .unwrap();
             parse_schema(scheme)
         }
-        ObjectOrReference::Ref { ref_path, .. } => Ok(IAST::Reference(ref_path)),
+        Some(ObjectOrReference::Ref { ref_path, .. }) => Ok(IAST::Reference(ref_path)),
+        None => Err(Error::ParseError("No request body".to_string())),
     }
 }
 fn parse_responses<'a>(
@@ -101,17 +102,18 @@ fn parse_responses<'a>(
         match response {
             ObjectOrReference::Object(req_body) => {
                 // its application/json only for us
-                let scheme = req_body
+                let scheme_opt = &req_body
                     .content
                     .iter()
-                    .next()
-                    .unwrap()
-                    .1
-                    .schema
-                    .as_ref()
-                    .unwrap();
-                let schema = parse_schema(&scheme).unwrap();
-                map.insert(code, schema);
+                    .next();
+                let scheme = match scheme_opt {
+                    Some(schema) => &schema.1.schema,
+                    None => return Err(Error::ParseError("No response body".to_string())),
+                };
+                if let Some(schema) = scheme {
+                    let schema = parse_schema(&schema).unwrap();
+                    map.insert(code, schema);
+                }
             }
             ObjectOrReference::Ref { ref_path, .. } => {
                 let schema = IAST::Reference(&ref_path);
