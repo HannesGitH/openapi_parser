@@ -137,17 +137,28 @@ impl<'a> SchemeAdder<'a> {
     ) -> (String, Vec<File>) {
         let class_name = self.class_name(name);
         let mut file_dependencies = Vec::new();
-        let mut properties = Vec::new();
+        let mut properties: Vec<Property> = Vec::new();
 
-        for (name, iast) in product.iter() {
+        for (p_name, iast) in product.iter() {
             if let intermediate::types::IAST::Primitive(prim) = &iast {
-                properties.push((name, prim));
+                properties.push(Property {
+                    name: p_name,
+                    typ: to_dart_prim(&prim.value),
+                    nullable: prim.nullable,
+                    doc_str: mk_doc_str(p_name, &prim, 1),
+                });
                 continue;
             }
-            let (content, depends_on_files) =
-                self.parse_named_iast(&format!("{}_{}", name, name), iast, depth + 1);
+            let full_name = format!("{}_{}", name, p_name);
+            let (content, depends_on_files) = self.parse_named_iast(&full_name, iast, depth + 1);
+            properties.push(Property {
+                name: p_name,
+                typ: full_name,
+                nullable: false,
+                doc_str: "".to_string(),
+            });
             file_dependencies.push(File {
-                path: std::path::PathBuf::from(format!("{}/{}.dart", name, name)),
+                path: std::path::PathBuf::from(format!("{}/{}.dart", name, p_name)),
                 content,
             });
             for f in depends_on_files.into_iter() {
@@ -161,25 +172,26 @@ impl<'a> SchemeAdder<'a> {
         let mut content = String::new();
         //TODO: import dependencies
         content.push_str(&format!("{}class {} {{\n", doc_str, class_name));
-        for (name, prim) in properties.iter() {
-            let prop_doc_str = mk_doc_str(name, &prim, 1);
+        for prop in properties.iter() {
             content.push_str(&format!(
                 "\n{}  final {}{} {};\n",
-                prop_doc_str,
-                to_dart_prim(&prim.value),
-                if prim.nullable { "?" } else { "" },
-                name
+                prop.doc_str,
+                prop.typ,
+                if prop.nullable { "?" } else { "" },
+                prop.name
             ));
         }
+        
         // constructor
         content.push_str(&format!("\n\n  const {}({{\n", class_name));
-        for (name, prim) in properties.iter() {
+        for prop in properties.iter() {
             content.push_str(&format!(
                 "    {}this.{},\n",
-                if !prim.nullable { "required " } else { "" },
-                name
+                if !prop.nullable { "required " } else { "" },
+                prop.name
             ));
         }
+       
         content.push_str("  });\n");
         content.push_str("\n}");
         (content, file_dependencies)
@@ -214,4 +226,11 @@ fn to_dart_prim(primitive: &intermediate::types::Primitive) -> String {
         intermediate::types::Primitive::Enum(_) => "Enum".to_string(),
         intermediate::types::Primitive::Dynamic => "dynamic".to_string(),
     }
+}
+
+struct Property<'a> {
+    name: &'a str,
+    typ: String,
+    nullable: bool,
+    doc_str: String,
 }
