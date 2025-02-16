@@ -115,7 +115,7 @@ impl<'a> SchemeAdder<'a> {
 
         let mut content = String::new();
         content.push_str(&format!(
-            "{}sealed class {}Union {{\n}}",
+            "{}sealed class {} {{\n}}",
             doc_str, class_name
         ));
         //TODO: add sub-classes
@@ -137,6 +137,7 @@ impl<'a> SchemeAdder<'a> {
     ) -> (String, Vec<File>) {
         let class_name = self.class_name(name);
         let mut file_dependencies = Vec::new();
+        let mut file_sub_dependencies = Vec::new();
         let mut properties: Vec<Property> = Vec::new();
 
         for (p_name, iast) in product.iter() {
@@ -153,7 +154,7 @@ impl<'a> SchemeAdder<'a> {
             let (content, depends_on_files) = self.parse_named_iast(&full_name, iast, depth + 1);
             properties.push(Property {
                 name: p_name,
-                typ: full_name,
+                typ: self.class_name(&full_name),
                 nullable: false,
                 doc_str: "".to_string(),
             });
@@ -162,7 +163,7 @@ impl<'a> SchemeAdder<'a> {
                 content,
             });
             for f in depends_on_files.into_iter() {
-                file_dependencies.push(File {
+                file_sub_dependencies.push(File {
                     path: std::path::PathBuf::from(format!("{}/{}", name, f.path.display())),
                     content: f.content,
                 });
@@ -170,7 +171,11 @@ impl<'a> SchemeAdder<'a> {
         }
 
         let mut content = String::new();
-        //TODO: import dependencies
+        for f in file_dependencies.iter() {
+            content.push_str(&format!("import '{}';\n", f.path.display()));
+        }
+        content.push_str("\n\n");
+
         content.push_str(&format!("{}class {} {{\n", doc_str, class_name));
         for prop in properties.iter() {
             content.push_str(&format!(
@@ -181,7 +186,7 @@ impl<'a> SchemeAdder<'a> {
                 prop.name
             ));
         }
-        
+
         // constructor
         content.push_str(&format!("\n\n  const {}({{\n", class_name));
         for prop in properties.iter() {
@@ -191,9 +196,10 @@ impl<'a> SchemeAdder<'a> {
                 prop.name
             ));
         }
-       
+
         content.push_str("  });\n");
-        content.push_str("\n}");
+        content.push_str("}");
+        file_dependencies.extend(file_sub_dependencies);
         (content, file_dependencies)
     }
 }
@@ -205,7 +211,11 @@ fn mk_doc_str<T>(name: &str, annotated_obj: &intermediate::AnnotatedObj<T>, tabs
         doc_str.push_str(&format!("{}/// TITLE: {}\n", "\t".repeat(tabs), title));
     }
     if let Some(description) = annotated_obj.description {
-        doc_str.push_str(&format!("{}/// {}\n", "\t".repeat(tabs), description));
+        doc_str.push_str(&format!(
+            "{}/// {}\n",
+            "\t".repeat(tabs),
+            description.replace("\n", format!("\n{}///", "\t".repeat(tabs)).as_str())
+        ));
     }
     if annotated_obj.is_deprecated {
         doc_str.push_str(&format!("{}/// DEPRECATED\n", "\t".repeat(tabs)));
