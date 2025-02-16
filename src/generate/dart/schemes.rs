@@ -54,7 +54,7 @@ impl<'a> SchemeAdder<'a> {
         format!("{}{}{}", self.class_prefix, name, self.class_suffix)
     }
 
-    fn parse_named_iast(
+    pub(super) fn parse_named_iast(
         &self,
         name: &str,
         iast: &intermediate::IAST,
