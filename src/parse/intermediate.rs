@@ -96,28 +96,29 @@ fn parse_object(object: &ObjectSchema) -> Result<IAST, Error> {
     };
     // if type is set, we can return a primitive type
     if let Some(types) = &object.schema_type {
-        if types.is_object_or_nullable_object() {
-            let prim_type = match types {
-                SchemaTypeSet::Single(typ) => typ,
-                SchemaTypeSet::Multiple(types) => types
+        let prim_type = match types {
+            SchemaTypeSet::Single(typ) => {
+                println!("single type: {:?}", typ);
+                typ
+            }
+            SchemaTypeSet::Multiple(types) => types
                 .iter()
                 .filter(|typ| typ != &&SchemaType::Null)
                 .collect::<Vec<_>>()
                 .first()
                 .unwrap_or(&&SchemaType::Null),
-            };
-            if prim_type != &SchemaType::Object {
-                let value = parse_prim_type(prim_type);
-                return Ok(IAST::Primitive(AnnotatedObj {
-                    nullable: types.contains(SchemaType::Null),
-                    is_deprecated: object.deprecated.unwrap_or(false),
-                    description: object.description.as_deref(),
-                    title: object.title.as_deref(),
-                    value,
-                }));
-            }
-            // if its an object, we need to parse the properties, so simply continue
+        };
+        if prim_type != &SchemaType::Object {
+            let value = parse_prim_type(prim_type);
+            return Ok(IAST::Primitive(AnnotatedObj {
+                nullable: types.contains(SchemaType::Null),
+                is_deprecated: object.deprecated.unwrap_or(false),
+                description: object.description.as_deref(),
+                title: object.title.as_deref(),
+                value,
+            }));
         }
+        // if its an object, we need to parse the properties, so simply continue
     }
     // otherwise we need to parse the object, and return the algebraic type
     // 1: if its has any_of or one_of set, we need to return a sum type
