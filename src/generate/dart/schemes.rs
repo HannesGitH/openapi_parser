@@ -120,16 +120,42 @@ impl<'a> SchemeAdder<'a> {
 
         let mut content = String::new();
 
+        content.push_str(&format!(
+            "import '../{}utils/serde.dart';\n",
+            "../".repeat(depth)
+        ));
+
         for f in dependencies.iter() {
             content.push_str(&format!("import '{}';\n", f.path.display()));
         }
 
-        content.push_str(&format!("{}sealed class {} {{\n\tconst {}();\n}}\n\n", doc_str, class_name, class_name));
+        content.push_str(&format!(
+            "{}sealed class {} implements APISerde {{\n\tconst {}();",
+            doc_str, class_name, class_name
+        ));
+        content.push_str("\n\n\t@Deprecated(\"not deprecated, but usage is highly discouraged, as its not deterministic\")");
+        content.push_str(&format!("\n\tfactory {}.fromJson(dynamic json) {{", class_name));
+        for v in variants.iter() {
+            content.push_str(&format!("\n\t\ttry{{\n\t\t\treturn {}_.fromJson(json);\n\t\t}} catch(e) {{}}", v));
+        }
+        content.push_str(&format!("\n\t\tthrow Exception('Could not parse json into {}');\n\t}}", class_name));
+
+        content.push_str("\n}\n\n");
 
         for v in variants.iter() {
-            content.push_str(&format!("class {}_ extends {} {{\n", v, class_name));
+            content.push_str(&format!(
+                "class {}_ extends {} {{\n",
+                v, class_name
+            ));
             content.push_str(&format!("  final {} value;\n", v));
             content.push_str(&format!("  const {}_(this.value);\n", v));
+            content.push_str(&format!(
+                "\n  @override\n  dynamic toJson() => value.toJson();\n"
+            ));
+            content.push_str(&format!(
+                "  factory {}_.fromJson(dynamic json) => \n\t\t{}_({}.fromJson(json));\n",
+                v, v, v
+            ));
             content.push_str("}\n\n");
         }
 
@@ -144,18 +170,42 @@ impl<'a> SchemeAdder<'a> {
         allowed_values: &Vec<String>,
     ) -> (String, String) {
         let class_name = format!("{}{}", self.class_prefix, name);
+        let allowed_values_str = allowed_values
+            .iter()
+            .map(|v| {
+                (
+                    v,
+                    v.chars()
+                        .filter(|c| c.is_alphanumeric())
+                        .collect::<String>(),
+                )
+            })
+            .collect::<Vec<(_, _)>>();
         let mut content = String::new();
-        content.push_str(&format!("\n{}enum {} {{\n", doc_str, class_name));
-        for value in allowed_values.iter() {
-            content.push_str(&format!("  ///{}\n", value));
-            content.push_str(&format!(
-                "  t{},\n",
-                value
-                    .chars()
-                    .filter(|c| c.is_alphanumeric())
-                    .collect::<String>()
-            ));
+        content.push_str(&format!(
+            "\n{}enum {} implements APISerde {{\n",
+            doc_str, class_name
+        ));
+        for (orig_value, enum_value) in allowed_values_str.iter() {
+            content.push_str(&format!("  ///{}\n", orig_value));
+            content.push_str(&format!("  t_{},\n", enum_value));
         }
+        content.push_str(&"\t;\n\n\t@override\n\tdynamic toJson() => switch(this) {\n");
+        for (orig_value, enum_value) in allowed_values_str.iter() {
+            content.push_str(&format!("\t\tt_{} => '{}',\n", enum_value, orig_value));
+        }
+        content.push_str(&format!(
+            "\t}};\n\tfactory {}fromJson(dynamic json) => switch(json) {{\n",
+            class_name
+        ));
+        for (orig_value, enum_value) in allowed_values_str.iter() {
+            content.push_str(&format!("\t\t'{}' => t_{},\n", orig_value, enum_value));
+        }
+        content.push_str(&format!(
+            "\t\t_ => throw UnreachableError('{}'),\n",
+            class_name
+        ));
+        content.push_str("  };\n");
         content.push_str("}\n");
         (class_name, content)
     }
@@ -225,6 +275,7 @@ impl<'a> SchemeAdder<'a> {
                     typ: prim_type,
                     nullable: prim.nullable,
                     doc_str: mk_doc_str(p_name, &prim, 1),
+                    is_primitive: true,
                 });
                 continue;
             }
@@ -235,6 +286,7 @@ impl<'a> SchemeAdder<'a> {
                 typ: self.class_name(&full_name),
                 nullable: false,
                 doc_str: "".to_string(),
+                is_primitive: false,
             });
             file_dependencies.push(File {
                 path: std::path::PathBuf::from(format!("{}/{}.dart", name, p_name)),
@@ -246,12 +298,19 @@ impl<'a> SchemeAdder<'a> {
         }
 
         let mut content = String::new();
+        content.push_str(&format!(
+            "import '../{}utils/serde.dart';\n",
+            "../".repeat(depth)
+        ));
         for f in file_dependencies.iter() {
             content.push_str(&format!("import '{}';\n", f.path.display()));
         }
         content.push_str("\n\n");
 
-        content.push_str(&format!("{}class {} {{\n", doc_str, class_name));
+        content.push_str(&format!(
+            "{}class {} implements APISerde {{\n",
+            doc_str, class_name
+        ));
         for prop in properties.iter() {
             content.push_str(&format!(
                 "\n{}  final {}{} {};\n",
@@ -271,9 +330,52 @@ impl<'a> SchemeAdder<'a> {
                 prop.name
             ));
         }
-
         content.push_str("  });\n");
-        content.push_str("}");
+
+        //to json
+        content.push_str("\n\n  @override\n  Map<String,dynamic> toJson() => {\n");
+        for prop in properties.iter() {
+            content.push_str(&format!(
+                "    {}'{}': {}{},\n",
+                if prop.nullable {
+                    format!("if({} != null) ", prop.name)
+                } else {
+                    "".to_string()
+                },
+                prop.name,
+                prop.name,
+                if !prop.is_primitive { ".toJson()" } else { "" }
+            ));
+        }
+        content.push_str("  };\n");
+
+        //from json
+        content.push_str(&format!(
+            "\n  factory {}.fromJson(Map<String,dynamic> json) => {}(\n",
+            class_name, class_name
+        ));
+        for prop in properties.iter() {
+            content.push_str(&format!(
+                "    {}: {},\n",
+                prop.name,
+                if prop.is_primitive {
+                    format!("json['{}']", prop.name)
+                } else {
+                    format!(
+                        "{}{}.fromJson(json['{}'])",
+                        if prop.nullable {
+                            format!("json['{}'] == null ? null : ", prop.name)
+                        } else {
+                            "".to_string()
+                        },
+                        prop.typ,
+                        prop.name,
+                    )
+                }
+            ));
+        }
+        content.push_str("  );\n");
+        content.push_str("}\n");
         content.push_str(&extra_content);
         file_dependencies.extend(file_sub_dependencies.into_iter().map(|f| File {
             path: std::path::PathBuf::from(format!("{}/{}", name, f.path.display())),
@@ -322,4 +424,5 @@ struct Property<'a> {
     typ: String,
     nullable: bool,
     doc_str: String,
+    is_primitive: bool,
 }

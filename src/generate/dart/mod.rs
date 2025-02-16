@@ -1,5 +1,6 @@
 pub struct DartGenerator;
 mod readme;
+mod serde;
 
 use crate::parse::intermediate;
 
@@ -11,6 +12,7 @@ impl super::Generator for DartGenerator {
         let class_suffix = "Model";
         let mut out = Vec::new();
         readme::add_readme(&mut out, spec);
+        serde::add_serde_utils(&mut out);
         println!("parsing spec to intermediate");
         let intermediate = match intermediate::parse(&spec) {
             Ok(intermediate) => intermediate,

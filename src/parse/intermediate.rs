@@ -63,7 +63,13 @@ fn parse_object(object: &ObjectSchema) -> Result<IAST, Error> {
         let enum_values = if let Some(const_value) = &object.const_value {
             Some(vec![const_value.to_string()])
         } else if !object.enum_values.is_empty() {
-            Some(object.enum_values.iter().map(|v| v.to_string()).collect())
+            Some(
+                object
+                    .enum_values
+                    .iter()
+                    .map(|v| v.to_string().trim_matches('"').to_string())
+                    .collect(),
+            )
         } else {
             None
         };
@@ -84,22 +90,19 @@ fn parse_object(object: &ObjectSchema) -> Result<IAST, Error> {
                     Primitive::Dynamic
                 }
             },
-            SchemaType::Array => {
-                match &object.items {
-                    Some(items) => {
-                        match parse_schema(&items) {
-                            Ok(obj) => Primitive::List(Box::new(obj)),
-                            Err(e) => {
-                                println!("error parsing list: {:?}", e);
-                                Primitive::Dynamic
-                            }
-                        }
-                    }
-                    None => {
-                        println!("error parsing list, no items");
+            SchemaType::Array => match &object.items {
+                Some(items) => match parse_schema(&items) {
+                    Ok(obj) => Primitive::List(Box::new(obj)),
+                    Err(e) => {
+                        println!("error parsing list: {:?}", e);
                         Primitive::Dynamic
                     }
-            }},
+                },
+                None => {
+                    println!("error parsing list, no items");
+                    Primitive::Dynamic
+                }
+            },
         }
     };
     // if type is set, we can return a primitive type
