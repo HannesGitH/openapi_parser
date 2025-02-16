@@ -72,7 +72,10 @@ impl<'a> SchemeAdder<'a> {
                     }
                 }
             }
-            intermediate::IAST::Reference(_) => todo!(),
+            intermediate::IAST::Reference(link) => {
+                let trimmed_link = link.replace("#/components/schemas/", "");
+                (format!("export '{}{}';", trimmed_link, "../".repeat(depth)), vec![])
+            }
             intermediate::IAST::Primitive(annotated_obj) => {
                 let doc_str = mk_doc_str(name, annotated_obj, 0);
                 (
@@ -134,19 +137,25 @@ impl<'a> SchemeAdder<'a> {
             doc_str, class_name, class_name
         ));
         content.push_str("\n\n\t@Deprecated(\"not deprecated, but usage is highly discouraged, as its not deterministic\")");
-        content.push_str(&format!("\n\tfactory {}.fromJson(dynamic json) {{", class_name));
+        content.push_str(&format!(
+            "\n\tfactory {}.fromJson(dynamic json) {{",
+            class_name
+        ));
         for v in variants.iter() {
-            content.push_str(&format!("\n\t\ttry{{\n\t\t\treturn {}_.fromJson(json);\n\t\t}} catch(e) {{}}", v));
+            content.push_str(&format!(
+                "\n\t\ttry{{\n\t\t\treturn {}_.fromJson(json);\n\t\t}} catch(e) {{}}",
+                v
+            ));
         }
-        content.push_str(&format!("\n\t\tthrow Exception('Could not parse json into {}');\n\t}}", class_name));
+        content.push_str(&format!(
+            "\n\t\tthrow Exception('Could not parse json into {}');\n\t}}",
+            class_name
+        ));
 
         content.push_str("\n}\n\n");
 
         for v in variants.iter() {
-            content.push_str(&format!(
-                "class {}_ extends {} {{\n",
-                v, class_name
-            ));
+            content.push_str(&format!("class {}_ extends {} {{\n", v, class_name));
             content.push_str(&format!("  final {} value;\n", v));
             content.push_str(&format!("  const {}_(this.value);\n", v));
             content.push_str(&format!(
