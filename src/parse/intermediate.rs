@@ -1,8 +1,8 @@
-mod types;
+pub mod types;
 use std::collections::{BTreeMap, HashMap};
 
 use oas3::spec::*;
-use types::*;
+pub use types::*;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
