@@ -114,10 +114,7 @@ impl<'a> SchemeAdder<'a> {
         }
 
         let mut content = String::new();
-        content.push_str(&format!(
-            "{}sealed class {} {{\n}}",
-            doc_str, class_name
-        ));
+        content.push_str(&format!("{}sealed class {} {{\n}}", doc_str, class_name));
         //TODO: add sub-classes
         // // for f in dependencies.iter() {
         // //     content.push_str(&format!(
@@ -126,6 +123,30 @@ impl<'a> SchemeAdder<'a> {
         // //     ));
         // // };
         (content, dependencies)
+    }
+
+    /// this is an enum
+    fn generate_primitive_sum_type(
+        &self,
+        name: &str,
+        doc_str: &str,
+        allowed_values: &Vec<String>,
+    ) -> (String, String) {
+        let class_name = format!("{}{}", self.class_prefix, name);
+        let mut content = String::new();
+        content.push_str(&format!("\n{}enum {} {{\n", doc_str, class_name));
+        for value in allowed_values.iter() {
+            content.push_str(&format!("  ///{}\n", value));
+            content.push_str(&format!(
+                "  t{},\n",
+                value
+                    .chars()
+                    .filter(|c| c.is_alphanumeric())
+                    .collect::<String>()
+            ));
+        }
+        content.push_str("}\n");
+        (class_name, content)
     }
 
     fn generate_product_type(
@@ -140,11 +161,57 @@ impl<'a> SchemeAdder<'a> {
         let mut file_sub_dependencies = Vec::new();
         let mut properties: Vec<Property> = Vec::new();
 
+        let mut extra_content = String::new();
+
         for (p_name, iast) in product.iter() {
-            if let intermediate::types::IAST::Primitive(prim) = &iast {
+            if let intermediate::IAST::Primitive(prim) = &iast {
+                let prim_type = match &prim.value {
+                    intermediate::types::Primitive::Enum(allowed_values) => {
+                        let full_name = format!("{}_{}", name, p_name);
+                        let (class_name, content) =
+                            self.generate_primitive_sum_type(&full_name, doc_str, &allowed_values);
+                        extra_content.push_str(&content);
+                        class_name
+                    }
+                    intermediate::types::Primitive::List(inner_iast) => {
+                        let full_name = format!("{}_{}", name, p_name);
+                        let (content, depends_on_files) =
+                            self.parse_named_iast(&full_name, inner_iast, depth + 1);
+                        file_dependencies.push(File {
+                            path: std::path::PathBuf::from(format!("{}/{}.dart", name, p_name)),
+                            content,
+                        });
+                        for f in depends_on_files.into_iter() {
+                            file_dependencies.push(f);
+                        }
+                        format!(
+                            "{}<{}>",
+                            to_dart_prim(&prim.value),
+                            self.class_name(&full_name)
+                        )
+                    }
+                    intermediate::types::Primitive::Map(inner_iast) => {
+                        let full_name = format!("{}_{}", name, p_name);
+                        let (content, depends_on_files) =
+                            self.parse_named_iast(&full_name, inner_iast, depth + 1);
+                        file_dependencies.push(File {
+                            path: std::path::PathBuf::from(format!("{}/{}.dart", name, p_name)),
+                            content,
+                        });
+                        for f in depends_on_files.into_iter() {
+                            file_dependencies.push(f);
+                        }
+                        format!(
+                            "{}<String,{}>",
+                            to_dart_prim(&prim.value),
+                            self.class_name(&full_name)
+                        )
+                    }
+                    _ => to_dart_prim(&prim.value),
+                };
                 properties.push(Property {
                     name: p_name,
-                    typ: to_dart_prim(&prim.value),
+                    typ: prim_type,
                     nullable: prim.nullable,
                     doc_str: mk_doc_str(p_name, &prim, 1),
                 });
@@ -199,6 +266,7 @@ impl<'a> SchemeAdder<'a> {
 
         content.push_str("  });\n");
         content.push_str("}");
+        content.push_str(&extra_content);
         file_dependencies.extend(file_sub_dependencies);
         (content, file_dependencies)
     }
