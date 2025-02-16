@@ -182,7 +182,7 @@ impl<'a> SchemeAdder<'a> {
                             content,
                         });
                         for f in depends_on_files.into_iter() {
-                            file_dependencies.push(f);
+                            file_sub_dependencies.push(f);
                         }
                         format!(
                             "{}<{}>",
@@ -199,7 +199,7 @@ impl<'a> SchemeAdder<'a> {
                             content,
                         });
                         for f in depends_on_files.into_iter() {
-                            file_dependencies.push(f);
+                            file_sub_dependencies.push(f);
                         }
                         format!(
                             "{}<String,{}>",
@@ -230,10 +230,7 @@ impl<'a> SchemeAdder<'a> {
                 content,
             });
             for f in depends_on_files.into_iter() {
-                file_sub_dependencies.push(File {
-                    path: std::path::PathBuf::from(format!("{}/{}", name, f.path.display())),
-                    content: f.content,
-                });
+                file_sub_dependencies.push(f);
             }
         }
 
@@ -267,7 +264,10 @@ impl<'a> SchemeAdder<'a> {
         content.push_str("  });\n");
         content.push_str("}");
         content.push_str(&extra_content);
-        file_dependencies.extend(file_sub_dependencies);
+        file_dependencies.extend(file_sub_dependencies.into_iter().map(|f| File {
+            path: std::path::PathBuf::from(format!("{}/{}", name, f.path.display())),
+            content: f.content,
+        }));
         (content, file_dependencies)
     }
 }
