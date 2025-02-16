@@ -98,13 +98,18 @@ impl<'a> SchemeAdder<'a> {
         let class_name = self.class_name(name);
         let mut dependencies = Vec::new();
 
+        let index_to_name = |idx: usize| format!("{}{}", name, idx);
+
+        let mut variants = Vec::new();
+
         for (idx, iast) in sum.iter().enumerate() {
-            let (content, depends_on_files) =
-                self.parse_named_iast(&format!("{}_{}", name, idx), iast, depth + 1);
+            let variant_name = index_to_name(idx);
+            let (content, depends_on_files) = self.parse_named_iast(&variant_name, iast, depth + 1);
             dependencies.push(File {
                 path: std::path::PathBuf::from(format!("{}/{}.dart", name, idx)),
                 content,
             });
+            variants.push(self.class_name(&variant_name));
             for f in depends_on_files.into_iter() {
                 dependencies.push(File {
                     path: std::path::PathBuf::from(format!("{}/{}", name, f.path.display())),
@@ -114,14 +119,20 @@ impl<'a> SchemeAdder<'a> {
         }
 
         let mut content = String::new();
-        content.push_str(&format!("{}sealed class {} {{\n}}", doc_str, class_name));
-        //TODO: add sub-classes
-        // // for f in dependencies.iter() {
-        // //     content.push_str(&format!(
-        // //         "{} class {} extends {}Union {{\n}}",
-        // //         doc_str, class_name, f.path.display()
-        // //     ));
-        // // };
+
+        for f in dependencies.iter() {
+            content.push_str(&format!("import '{}';\n", f.path.display()));
+        }
+
+        content.push_str(&format!("{}sealed class {} {{\n\tconst {}();\n}}\n\n", doc_str, class_name, class_name));
+
+        for v in variants.iter() {
+            content.push_str(&format!("class {}_ extends {} {{\n", v, class_name));
+            content.push_str(&format!("  final {} value;\n", v));
+            content.push_str(&format!("  const {}_(this.value);\n", v));
+            content.push_str("}\n\n");
+        }
+
         (content, dependencies)
     }
 

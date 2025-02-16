@@ -1,5 +1,5 @@
 pub mod types;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use oas3::spec::*;
 pub use types::*;
