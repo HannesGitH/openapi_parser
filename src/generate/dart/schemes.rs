@@ -79,12 +79,31 @@ impl<'a> SchemeAdder<'a> {
             intermediate::IAST::Primitive(annotated_obj) => {
                 let doc_str = mk_doc_str(name, annotated_obj, 0);
                 (
-                    format!(
-                        "{}typedef {} = {};",
-                        doc_str,
-                        self.class_name(name),
-                        to_dart_prim(&annotated_obj.value)
-                    ),
+                    match &annotated_obj.value {
+                        intermediate::types::Primitive::Enum(allowed_values) => {
+                            let (class_name, content) =
+                                self.generate_primitive_sum_type(name, &doc_str, &allowed_values);
+                                let mut ret = format!(
+                                    "import '../{}utils/serde.dart';\n\n",
+                                    "../".repeat(depth)
+                                );
+                                ret.push_str(&format!(
+                                    "{}typedef {} = {};\n",
+                                    doc_str,
+                                    self.class_name(name),
+                                    class_name
+                                ));
+
+                                ret.push_str(&content);
+                                ret
+                        }
+                        _ => format!(
+                            "{}typedef {} = {};",
+                            doc_str,
+                            self.class_name(name),
+                            to_dart_prim(&annotated_obj.value)
+                        ),
+                    },
                     vec![],
                 )
             }
