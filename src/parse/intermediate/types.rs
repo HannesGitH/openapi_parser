@@ -1,7 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 pub struct IntermediateFormat<'a> {
     pub schemes: Vec<Scheme<'a>>,
+    pub routes: Vec<Route<'a>>,
 }
 
 pub struct Scheme<'a> {
@@ -9,6 +10,36 @@ pub struct Scheme<'a> {
     pub obj: IAST<'a>,
 }
 
+pub struct Route<'a> {
+    pub path: &'a str,
+    pub description: Option<&'a str>,
+    pub endpoints: Vec<Endpoint<'a>>,
+}
+
+pub struct Endpoint<'a> {
+    pub method: Method,
+    pub description: Option<&'a str>,
+    pub params: Option<Vec<Param<'a>>>,
+    pub request: IAST<'a>,
+    pub responses: BTreeMap<&'a String, IAST<'a>>,
+}
+
+pub struct Param<'a> {
+    pub name: &'a str,
+    pub description: Option<&'a str>,
+    pub required: bool,
+}
+
+pub enum Method {
+    Get,
+    Post,
+    Put,
+    Delete,
+    Patch,
+    Head,
+    Options,
+    Trace,
+}
 #[derive(Debug, PartialEq, Eq)]
 pub struct AnnotatedObj<'a, T> {
     pub nullable: bool,

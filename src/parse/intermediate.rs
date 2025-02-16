@@ -1,8 +1,11 @@
 pub mod types;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
+use oas3::spec::Response as Responses;
 use oas3::spec::*;
 pub use types::*;
+#[macro_use]
+mod macros;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
@@ -25,7 +28,113 @@ pub fn parse(spec: &oas3::Spec) -> Result<IntermediateFormat, Error> {
             },
         });
     }
-    Ok(IntermediateFormat { schemes })
+
+    let mut routes: Vec<Route> = match &spec.paths {
+        Some(paths) => {
+            let mut routes = Vec::new();
+            for (path, route) in paths.iter() {
+                routes.push(Route {
+                    path: path.as_str(),
+                    description: route.description.as_deref(),
+                    endpoints: {
+                        let mut endpoints = Vec::new();
+                        {
+                            if let Some(endpoint) = &route.get {
+                                // let parser: &Parser = &parser;
+                                (&mut endpoints).push(Endpoint {
+                                    method: (Method::Get),
+                                    description: endpoint.description.as_deref(),
+                                    params: parse_params(&endpoint.parameters).ok(),
+                                    request: parse_request(
+                                        &endpoint.request_body.as_ref().unwrap(),
+                                    )
+                                    .unwrap(),
+                                    responses: parse_responses(&endpoint.responses.as_ref().unwrap()).unwrap(),
+                                });
+                            }
+                        };
+                        handle_endpoint!(
+                            &parser,
+                            &mut endpoints,
+                            &route.post,
+                            Method::Post,
+                            parse_params,
+                            parse_request,
+                            parse_responses
+                        );
+                        // handle_endpoint!(&parser, &mut endpoints, &route.put, Method::Put);
+                        // handle_endpoint!(&parser, &mut endpoints, &route.delete, Method::Delete);
+                        // handle_endpoint!(&parser, &mut endpoints, &route.patch, Method::Patch);
+                        // handle_endpoint!(&parser, &mut endpoints, &route.options, Method::Options);
+                        // handle_endpoint!(&parser, &mut endpoints, &route.head, Method::Head);
+                        // handle_endpoint!(&parser, &mut endpoints, &route.trace, Method::Trace);
+
+                        endpoints
+                    },
+                });
+            }
+            routes
+        }
+        None => vec![],
+    };
+
+    Ok(IntermediateFormat { schemes, routes })
+}
+
+fn parse_params(params: &Vec<ObjectOrReference<Parameter>>) -> Result<Vec<Param>, Error> {
+    // params.iter().map(|param| Param {
+    //     name: param.name.as_str(),
+    //     description: param.description.as_deref(),
+    //     required: param.required.unwrap_or(false),
+    // });
+    let mut params: Vec<Param> = Vec::new();
+    Ok::<Vec<Param>, Error>(params)
+}
+fn parse_request(request: &ObjectOrReference<RequestBody>) -> Result<IAST, Error> {
+    match request {
+        ObjectOrReference::Object(req_body) => {
+            // its application/json only for us
+            let scheme = req_body
+                .content
+                .iter()
+                .next()
+                .unwrap()
+                .1
+                .schema
+                .as_ref()
+                .unwrap();
+            parse_schema(scheme)
+        }
+        ObjectOrReference::Ref { ref_path, .. } => Ok(IAST::Reference(ref_path)),
+    }
+}
+fn parse_responses<'a>(
+    responses: &'a BTreeMap<String, ObjectOrReference<Responses>>,
+) -> Result<BTreeMap<&'a String, IAST<'a>>, Error> {
+    let mut map = BTreeMap::new();
+    for (code, response) in responses {
+        match response {
+            ObjectOrReference::Object(req_body) => {
+                // its application/json only for us
+                let scheme = req_body
+                    .content
+                    .iter()
+                    .next()
+                    .unwrap()
+                    .1
+                    .schema
+                    .as_ref()
+                    .unwrap();
+                let schema = parse_schema(&scheme).unwrap();
+                map.insert(code, schema);
+            }
+            ObjectOrReference::Ref { ref_path, .. } => {
+                let schema = IAST::Reference(&ref_path);
+                map.insert(code, schema);
+            }
+        }
+    }
+    Ok(map)
 }
 
 fn parse_schema(schema: &ObjectOrReference<ObjectSchema>) -> Result<IAST, Error> {
