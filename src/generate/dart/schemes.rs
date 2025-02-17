@@ -127,7 +127,8 @@ impl<'a> SchemeAdder<'a> {
         depth: usize,
     ) -> (String, Vec<File>) {
         let class_name = self.class_name(name);
-        let mut dependencies = Vec::new();
+        let mut file_dependencies = Vec::new();
+        let mut sub_file_dependencies = Vec::new();
 
         let index_to_name = |idx: usize| format!("{}{}", name, idx);
 
@@ -136,16 +137,13 @@ impl<'a> SchemeAdder<'a> {
         for (idx, iast) in sum.iter().enumerate() {
             let variant_name = index_to_name(idx);
             let (content, depends_on_files) = self.parse_named_iast(&variant_name, iast, depth + 1);
-            dependencies.push(File {
+            file_dependencies.push(File {
                 path: std::path::PathBuf::from(format!("{}/{}.dart", name, idx)),
                 content,
             });
             variants.push(self.class_name(&variant_name));
             for f in depends_on_files.into_iter() {
-                dependencies.push(File {
-                    path: std::path::PathBuf::from(format!("{}/{}", name, f.path.display())),
-                    content: f.content,
-                });
+                sub_file_dependencies.push(f);
             }
         }
 
@@ -156,12 +154,12 @@ impl<'a> SchemeAdder<'a> {
             "../".repeat(depth)
         ));
 
-        for f in dependencies.iter() {
+        for f in file_dependencies.iter() {
             content.push_str(&format!("import '{}';\n", f.path.display()));
         }
 
         content.push_str(&format!(
-            "{}sealed class {} implements APISerde {{\n\tconst {}();",
+            "\n{}sealed class {} implements APISerde {{\n\tconst {}();",
             doc_str, class_name, class_name
         ));
         content.push_str("\n\n\t@Deprecated(\"not deprecated, but usage is highly discouraged, as its not deterministic\")");
@@ -196,7 +194,11 @@ impl<'a> SchemeAdder<'a> {
             content.push_str("}\n\n");
         }
 
-        (content, dependencies)
+        file_dependencies.extend(sub_file_dependencies.into_iter().map(|f| File {
+            path: std::path::PathBuf::from(format!("{}/{}", name, f.path.display())),
+            content: f.content,
+        }));
+        (content, file_dependencies)
     }
 
     /// this is an enum

@@ -89,13 +89,13 @@ impl<'a> EndpointAdder<'a> {
             let body_str = match &endpoint.request {
                 Some(request) => {
                     //do things
-                    let (content, sub_deps) = self.scheme_adder.parse_named_iast(&format!("{}Request", name), request, 1);
+                    let (content, sub_deps) = self.scheme_adder.parse_named_iast(&format!("{}Request", name), request, depth+1);
                     deps.extend(sub_deps.into_iter().map(|f| File {
                         path: std::path::PathBuf::from(format!("{}/{}", name, f.path.to_str().unwrap())),
                         content: f.content,
                     }));
                     deps.push(File {
-                        path: std::path::PathBuf::from(format!("{}/{}/body_schema.dart", name, method_str)),
+                        path: std::path::PathBuf::from(format!("{}/{}.body.schema.dart", name, method_str)),
                         content,
                     });
                     format!(", {{required super.body}}")
