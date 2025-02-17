@@ -52,7 +52,7 @@ impl<'a> SchemeAdder<'a> {
         }));
     }
 
-    fn class_name(&self, name: &str) -> String {
+    pub(super) fn class_name(&self, name: &str) -> String {
         format!("{}{}{}", self.class_prefix, name, self.class_suffix)
     }
 
@@ -88,10 +88,9 @@ impl<'a> SchemeAdder<'a> {
                         trimmed_link,
                     ),
                     vec![],
-                    //TODO:
                     Some(NotBuiltData {
+                        type_name: self.class_name(&trimmed_link),
                         reason: NotBuiltReason::Link(trimmed_link),
-                        type_name: name.to_string(),
                     }),
                 )
             }
@@ -508,8 +507,8 @@ struct Property<'a> {
 }
 
 pub(super) struct NotBuiltData {
-    reason: NotBuiltReason,
-    type_name: String,
+    pub reason: NotBuiltReason,
+    pub type_name: String,
 }
 
 pub(super) enum NotBuiltReason {
