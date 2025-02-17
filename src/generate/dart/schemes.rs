@@ -17,10 +17,10 @@ impl<'a> SchemeAdder<'a> {
         }
     }
 
-    pub(super) fn add_schemes(
+    pub(super) async fn add_schemes(
         &self,
         out: &mut Vec<File>,
-        intermediate: &intermediate::IntermediateFormat,
+        intermediate: &intermediate::IntermediateFormat<'a>,
     ) {
         let mut scheme_files = Vec::new();
         for scheme in intermediate.schemes.iter() {

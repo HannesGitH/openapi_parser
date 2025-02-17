@@ -8,7 +8,7 @@ mod schemes;
 mod endpoints;
 
 impl super::Generator for DartGenerator {
-    fn generate(&self, spec: &oas3::Spec) -> Result<Vec<super::File>, String> {
+    async fn generate(&self, spec: &oas3::Spec) -> Result<Vec<super::File>, String> {
         let class_prefix = "API";
         let class_suffix = "Model";
         let mut out = Vec::new();
@@ -24,7 +24,7 @@ impl super::Generator for DartGenerator {
         };
         let scheme_adder = schemes::SchemeAdder::new(class_prefix, class_suffix);
         let endpoint_adder = endpoints::EndpointAdder;
-        scheme_adder.add_schemes(&mut out, &intermediate);
+        scheme_adder.add_schemes(&mut out, &intermediate).await;
         endpoint_adder.add_endpoints(&mut out, &intermediate);
         Ok(out)
     }

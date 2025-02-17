@@ -8,11 +8,11 @@ enum DestinationLanguage {
 }
 
 impl Generator for DestinationLanguage {
-    fn generate(&self, spec: &oas3::Spec) -> Result<Vec<File>, String> {
+    async fn generate(&self, spec: &oas3::Spec) -> Result<Vec<File>, String> {
         let generator = match self {
             DestinationLanguage::Dart => DartGenerator,
         };
-        generator.generate(spec)
+        generator.generate(spec).await
     }
 }
 
@@ -62,7 +62,7 @@ async fn main() {
         }
     };
     println!("generating {:} code", destination_language);
-    let files = match destination_language.generate(&spec) {
+    let files = match destination_language.generate(&spec).await {
         Ok(files) => files,
         Err(e) => {
             println!("generating code error: {:?}", e);
