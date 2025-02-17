@@ -1,4 +1,4 @@
-use std::{collections::HashMap, thread};
+use std::collections::HashMap;
 
 use super::super::interface::*;
 
@@ -22,43 +22,29 @@ impl<'a> SchemeAdder<'a> {
         out: &mut Vec<File>,
         intermediate: &intermediate::IntermediateFormat<'a>,
     ) {
-        let scheme_file_buffers: Vec<Vec<File>> = Vec::new();
-        thread::scope(|s| {
-            for (idx, scheme) in intermediate.schemes.iter().enumerate() {
-                let scheme_files = &mut (scheme_file_buffers[idx]);//DOESNT COMPILE
-                let calc = move || {
-                    let (content, depends_on_files) =
-                        self.parse_named_iast(scheme.name, &scheme.obj, 0);
-                    let file = File {
-                        path: std::path::PathBuf::from(format!("{}.dart", scheme.name)),
-                        content,
-                    };
-                    scheme_files.push(file);
-                    scheme_files.extend(depends_on_files);
-                };
-                s.spawn(calc);
-            }
-        });
         let mut scheme_files = Vec::new();
-        for scheme_file_buffer in scheme_file_buffers.into_iter() {
-            scheme_files.extend(scheme_file_buffer.into_iter());
+        for scheme in intermediate.schemes.iter() {
+            let (content, depends_on_files) = self.parse_named_iast(scheme.name, &scheme.obj, 0);
+            let file = File {
+                path: std::path::PathBuf::from(format!("{}.dart", scheme.name)),
+                content,
+            };
+            scheme_files.push(file);
+            scheme_files.extend(depends_on_files);
         }
-
-        
         // add barrel file
-        // let mut barrel_file = File {
-        //     path: std::path::PathBuf::from("schemes.dart"),
-        //     content: {
-        //         let mut content = String::new();
-        //         for file in scheme_files.iter() {
-        //             content.push_str(&format!("export '{}';\n", file.path.display()));
-        //         }
-        //         content
-        //     },
-        // };
-        // scheme_files.push(&mut barrel_file);
+        scheme_files.push(File {
+            path: std::path::PathBuf::from("schemes.dart"),
+            content: {
+                let mut content = String::new();
+                for file in scheme_files.iter() {
+                    content.push_str(&format!("export '{}';\n", file.path.display()));
+                }
+                content
+            },
+        });
         // put all scheme files into the scheme directory
-        out.extend(scheme_files.into_iter().map(move|f| File {
+        out.extend(scheme_files.into_iter().map(|f| File {
             path: std::path::PathBuf::from(format!("schemes/{}", f.path.display())),
             content: f.content,
         }));
@@ -88,10 +74,7 @@ impl<'a> SchemeAdder<'a> {
             }
             intermediate::IAST::Reference(link) => {
                 let trimmed_link = link.replace("#/components/schemas/", "");
-                (
-                    format!("export '{}{}';", trimmed_link, "../".repeat(depth)),
-                    vec![],
-                )
+                (format!("export '{}{}';", trimmed_link, "../".repeat(depth)), vec![])
             }
             intermediate::IAST::Primitive(annotated_obj) => {
                 let doc_str = mk_doc_str(name, annotated_obj, 0);
@@ -100,17 +83,19 @@ impl<'a> SchemeAdder<'a> {
                         intermediate::types::Primitive::Enum(allowed_values) => {
                             let (class_name, content) =
                                 self.generate_primitive_sum_type(name, &doc_str, &allowed_values);
-                            let mut ret =
-                                format!("import '../{}utils/serde.dart';\n\n", "../".repeat(depth));
-                            ret.push_str(&format!(
-                                "{}typedef {} = {};\n",
-                                doc_str,
-                                self.class_name(name),
-                                class_name
-                            ));
+                                let mut ret = format!(
+                                    "import '../{}utils/serde.dart';\n\n",
+                                    "../".repeat(depth)
+                                );
+                                ret.push_str(&format!(
+                                    "{}typedef {} = {};\n",
+                                    doc_str,
+                                    self.class_name(name),
+                                    class_name
+                                ));
 
-                            ret.push_str(&content);
-                            ret
+                                ret.push_str(&content);
+                                ret
                         }
                         _ => format!(
                             "{}typedef {} = {};",
