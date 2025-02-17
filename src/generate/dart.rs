@@ -1,10 +1,11 @@
 pub struct DartGenerator;
-mod readme;
-mod serde;
 
 use crate::parse::intermediate;
 
+mod readme;
+mod serde;
 mod schemes;
+mod endpoints;
 
 impl super::Generator for DartGenerator {
     fn generate(&self, spec: &oas3::Spec) -> Result<Vec<super::File>, String> {
@@ -22,7 +23,9 @@ impl super::Generator for DartGenerator {
             }
         };
         let scheme_adder = schemes::SchemeAdder::new(class_prefix, class_suffix);
+        let endpoint_adder = endpoints::EndpointAdder;
         scheme_adder.add_schemes(&mut out, &intermediate);
+        endpoint_adder.add_endpoints(&mut out, &intermediate);
         Ok(out)
     }
 }
