@@ -67,14 +67,22 @@ pub fn parse(spec: &oas3::Spec) -> Result<IntermediateFormat, Error> {
 }
 
 fn parse_params(params: &Vec<ObjectOrReference<Parameter>>) -> Result<Vec<Param>, Error> {
-    // params.iter().map(|param| Param {
-    //     name: param.name.as_str(),
-    //     description: param.description.as_deref(),
-    //     required: param.required.unwrap_or(false),
-    // });
-    let mut params: Vec<Param> = Vec::new();
-    Ok::<Vec<Param>, Error>(params)
+    params
+        .iter()
+        .map(|param| match param {
+            ObjectOrReference::Object(param) => Ok(Param {
+                name: param.name.as_str(),
+                description: param.description.as_deref(),
+                required: param.required.unwrap_or(false),
+            }),
+            ObjectOrReference::Ref { ref_path, .. } => Err(Error::ParseError(format!(
+                "Reference to {} not supported in params",
+                ref_path
+            ))),
+        })
+        .collect()
 }
+
 fn parse_request(request: Option<&ObjectOrReference<RequestBody>>) -> Result<IAST, Error> {
     match request {
         Some(ObjectOrReference::Object(req_body)) => {
@@ -102,10 +110,7 @@ fn parse_responses<'a>(
         match response {
             ObjectOrReference::Object(req_body) => {
                 // its application/json only for us
-                let scheme_opt = &req_body
-                    .content
-                    .iter()
-                    .next();
+                let scheme_opt = &req_body.content.iter().next();
                 let scheme = match scheme_opt {
                     Some(schema) => &schema.1.schema,
                     None => return Err(Error::ParseError("No response body".to_string())),
@@ -204,10 +209,7 @@ fn parse_object(object: &ObjectSchema) -> Result<IAST, Error> {
     // if type is set, we can return a primitive type
     if let Some(types) = &object.schema_type {
         let prim_type = match types {
-            SchemaTypeSet::Single(typ) => {
-                println!("single type: {:?}", typ);
-                typ
-            }
+            SchemaTypeSet::Single(typ) => typ,
             SchemaTypeSet::Multiple(types) => types
                 .iter()
                 .filter(|typ| typ != &&SchemaType::Null)
