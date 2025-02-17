@@ -26,7 +26,7 @@ impl<'a> SchemeAdder<'a> {
     ) {
         let mut scheme_files = Vec::new();
         for scheme in intermediate.schemes.iter() {
-            let (content, depends_on_files) = self.parse_named_iast(scheme.name, &scheme.obj, 0);
+            let (content, depends_on_files, _) = self.parse_named_iast(scheme.name, &scheme.obj, 0);
             let file = File {
                 path: std::path::PathBuf::from(format!("{}.dart", scheme.name)),
                 content,
@@ -61,60 +61,77 @@ impl<'a> SchemeAdder<'a> {
         name: &str,
         iast: &intermediate::IAST,
         depth: usize,
-    ) -> (String, Vec<File>) {
+    ) -> (String, Vec<File>, Option<NotBuiltData>) {
         match iast {
             intermediate::IAST::Object(annotated_obj) => {
                 let doc_str = mk_doc_str(name, annotated_obj, 0);
                 let alg_type = &annotated_obj.value;
                 use intermediate::AlgType;
                 match alg_type {
-                    AlgType::Sum(sum) => self.generate_sum_type(name, &doc_str, sum, depth),
+                    AlgType::Sum(sum) => {
+                        let (content, files) = self.generate_sum_type(name, &doc_str, sum, depth);
+                        (content, files, None)
+                    }
                     AlgType::Product(product) => {
-                        self.generate_product_type(name, &doc_str, product, depth)
+                        let (content, files) =
+                            self.generate_product_type(name, &doc_str, product, depth);
+                        (content, files, None)
                     }
                 }
             }
             intermediate::IAST::Reference(link) => {
                 let trimmed_link = link.replace("#/components/schemas/", "");
                 (
-                    format!("export '{}{}';", trimmed_link, "../".repeat(depth)),
+                    format!(
+                        "export '{}schemes/{}.dart';",
+                        "../".repeat(depth + 1),
+                        trimmed_link,
+                    ),
                     vec![],
+                    //TODO:
+                    Some(NotBuiltData {
+                        reason: NotBuiltReason::Link(trimmed_link),
+                        type_name: name.to_string(),
+                    }),
                 )
             }
             intermediate::IAST::Primitive(annotated_obj) => {
                 let doc_str = mk_doc_str(name, annotated_obj, 0);
-                (
-                    match &annotated_obj.value {
-                        intermediate::types::Primitive::Enum(allowed_values) => {
-                            let (class_name, content) = self.generate_primitive_sum_type(
-                                name,
-                                &doc_str,
-                                &allowed_values
-                                    .iter()
-                                    .map(|v| (v.as_str(), empty_str.as_str()))
-                                    .collect::<Vec<(_, _)>>(),
-                            );
-                            let mut ret =
-                                format!("import '../{}utils/serde.dart';\n\n", "../".repeat(depth));
-                            ret.push_str(&format!(
-                                "{}typedef {} = {};\n",
-                                doc_str,
-                                self.class_name(name),
-                                class_name
-                            ));
+                let mk_type_def = |name: &str, typ: &str| {
+                    let mut ret = String::new();
+                    let name = self.class_name(name);
+                    ret.push_str(&format!("{}typedef {} = {};\n", doc_str, name, typ));
+                    ret
+                };
+                match &annotated_obj.value {
+                    intermediate::types::Primitive::Enum(allowed_values) => {
+                        let (class_name, content) = self.generate_primitive_sum_type(
+                            name,
+                            &doc_str,
+                            &allowed_values
+                                .iter()
+                                .map(|v| (v.as_str(), empty_str.as_str()))
+                                .collect::<Vec<(_, _)>>(),
+                        );
+                        let mut ret =
+                            format!("import '../{}utils/serde.dart';\n\n", "../".repeat(depth));
+                        ret.push_str(&mk_type_def(name, &class_name));
 
-                            ret.push_str(&content);
-                            ret
-                        }
-                        _ => format!(
-                            "{}typedef {} = {};",
-                            doc_str,
-                            self.class_name(name),
-                            to_dart_prim(&annotated_obj.value)
-                        ),
-                    },
-                    vec![],
-                )
+                        ret.push_str(&content);
+                        (ret, vec![], None)
+                    }
+                    _ => {
+                        let typ = to_dart_prim(&annotated_obj.value);
+                        (
+                            mk_type_def(name, &typ),
+                            vec![],
+                            Some(NotBuiltData {
+                                reason: NotBuiltReason::Primitive,
+                                type_name: typ,
+                            }),
+                        )
+                    }
+                }
             }
         }
     }
@@ -136,12 +153,13 @@ impl<'a> SchemeAdder<'a> {
 
         for (idx, iast) in sum.iter().enumerate() {
             let variant_name = index_to_name(idx);
-            let (content, depends_on_files) = self.parse_named_iast(&variant_name, iast, depth + 1);
+            let (content, depends_on_files, not_built) =
+                self.parse_named_iast(&variant_name, iast, depth + 1);
             file_dependencies.push(File {
                 path: std::path::PathBuf::from(format!("{}/{}.dart", name, idx)),
                 content,
             });
-            variants.push(self.class_name(&variant_name));
+            variants.push((self.class_name(&variant_name), not_built));
             for f in depends_on_files.into_iter() {
                 sub_file_dependencies.push(f);
             }
@@ -167,7 +185,7 @@ impl<'a> SchemeAdder<'a> {
             "\n\tfactory {}.fromJson(dynamic json) {{",
             class_name
         ));
-        for v in variants.iter() {
+        for (v, _) in variants.iter() {
             content.push_str(&format!(
                 "\n\t\ttry{{\n\t\t\treturn {}_.fromJson(json);\n\t\t}} catch(e) {{}}",
                 v
@@ -180,16 +198,29 @@ impl<'a> SchemeAdder<'a> {
 
         content.push_str("\n}\n\n");
 
-        for v in variants.iter() {
+        for (v, not_built) in variants.iter() {
             content.push_str(&format!("class {}_ extends {} {{\n", v, class_name));
             content.push_str(&format!("  final {} value;\n", v));
             content.push_str(&format!("  const {}_(this.value);\n", v));
             content.push_str(&format!(
-                "\n  @override\n  dynamic toJson() => value.toJson();\n"
+                "\n  @override\n  dynamic toJson() => value{};\n",
+                match not_built {
+                    Some(NotBuiltData {
+                        reason: NotBuiltReason::Primitive,
+                        type_name: _,
+                    }) => String::new(),
+                    _ => format!(".toJson()"),
+                }
             ));
             content.push_str(&format!(
-                "  factory {}_.fromJson(dynamic json) => \n\t\t{}_({}.fromJson(json));\n",
-                v, v, v
+                "  factory {}_.fromJson(dynamic json) => \n\t\t{}_({});\n",
+                v, v, match not_built {
+                    Some(NotBuiltData {
+                        reason: NotBuiltReason::Primitive,
+                        type_name: _,
+                    }) => "json".to_string(),
+                    _ => format!("{}.fromJson(json)", v),
+                }
             ));
             content.push_str("}\n\n");
         }
@@ -285,7 +316,7 @@ impl<'a> SchemeAdder<'a> {
                     }
                     intermediate::types::Primitive::List(inner_iast) => {
                         let full_name = format!("{}_{}", name, p_name);
-                        let (content, depends_on_files) =
+                        let (content, depends_on_files, _) =
                             self.parse_named_iast(&full_name, inner_iast, depth + 1);
                         file_dependencies.push(File {
                             path: std::path::PathBuf::from(format!("{}/{}.dart", name, p_name)),
@@ -302,7 +333,7 @@ impl<'a> SchemeAdder<'a> {
                     }
                     intermediate::types::Primitive::Map(inner_iast) => {
                         let full_name = format!("{}_{}", name, p_name);
-                        let (content, depends_on_files) =
+                        let (content, depends_on_files, _) =
                             self.parse_named_iast(&full_name, inner_iast, depth + 1);
                         file_dependencies.push(File {
                             path: std::path::PathBuf::from(format!("{}/{}.dart", name, p_name)),
@@ -329,7 +360,7 @@ impl<'a> SchemeAdder<'a> {
                 continue;
             }
             let full_name = format!("{}_{}", name, p_name);
-            let (content, depends_on_files) = self.parse_named_iast(&full_name, iast, depth + 1);
+            let (content, depends_on_files, _) = self.parse_named_iast(&full_name, iast, depth + 1);
             properties.push(Property {
                 name: p_name,
                 typ: self.class_name(&full_name),
@@ -474,4 +505,14 @@ struct Property<'a> {
     nullable: bool,
     doc_str: String,
     is_primitive: bool,
+}
+
+pub(super) struct NotBuiltData {
+    reason: NotBuiltReason,
+    type_name: String,
+}
+
+pub(super) enum NotBuiltReason {
+    Primitive,
+    Link(String),
 }

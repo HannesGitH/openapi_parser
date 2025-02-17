@@ -38,7 +38,7 @@ impl<'a> EndpointAdder<'a> {
                 .chars()
                 .map(|c| if c.is_alphanumeric() { c } else { '_' })
                 .collect::<String>();
-            let name = format!("API{}Methods", sanitized_path);
+            let name = format!("{}Methods", sanitized_path);
             let (content, files) = self.generate_path_method_wrapper(&name, route, 1);
             out_files.push(File {
                 path: std::path::PathBuf::from(format!("routes/{}.dart", sanitized_path)),
@@ -83,13 +83,13 @@ impl<'a> EndpointAdder<'a> {
         cpf!(c, "class {} extends APIPath {{", name);
         cpf!(c, "  {}({{required super.interpolator, required super.handler}})", name);
         cpf!(c, "    :super(path: APIPathEnum.fromJson('{}'));", route.path);
-        for endpoint in &route.endpoints {
-            let method_str = endpoint.method.string();
+        for method in &route.endpoints {
+            let method_str = method.method.string();
             let param_name = format!("_P_{}", method_str);
-            let body_str = match &endpoint.request {
+            let body_str = match &method.request {
                 Some(request) => {
                     //do things
-                    let (content, sub_deps) = self.scheme_adder.parse_named_iast(&format!("{}Request", name), request, depth+1);
+                    let (content, sub_deps, _) = self.scheme_adder.parse_named_iast(&format!("{}Request", name), request, depth+1);
                     deps.extend(sub_deps.into_iter().map(|f| File {
                         path: std::path::PathBuf::from(format!("{}/{}", name, f.path.to_str().unwrap())),
                         content: f.content,
@@ -103,8 +103,8 @@ impl<'a> EndpointAdder<'a> {
                 None => String::new(),
             };
 
-            param_typedef_strs.push_str(&mk_params(&endpoint.params, &param_name));
-            cpf!(c, "  {}({} params{});", method_str, param_name, body_str);
+            param_typedef_strs.push_str(&mk_params(&method.params, &param_name));
+            cpf!(c, "  {}({}{}){{}}", method_str, if method.params.is_empty() { String::new() } else { format!("{} params", param_name) }, body_str);
         }
         cpf!(c, "}}\n");
         c.push_str(&param_typedef_strs);
@@ -114,12 +114,16 @@ impl<'a> EndpointAdder<'a> {
 
 fn mk_params(params: &[intermediate::Param], name: &str) -> String {
     let mut s = String::new();
-    cpf!(s, "typedef {} = ({{", name);
-    for p in params {
-        cpf!(s, "  /// {}", p.description.unwrap_or("").replace("\n", "\n  /// "));
-        cpf!(s, "  String{} {},", if p.required { "" } else { "?" }, p.name);
+    s.push_str(&format!("typedef {} = (", name));
+    if !params.is_empty() {
+        cpf!(s, "{{");
+        for p in params {
+            cpf!(s, "  /// {}", p.description.unwrap_or("").replace("\n", "\n  /// "));
+            cpf!(s, "  String{} {},", if p.required { "" } else { "?" }, p.name);
+        }
+        cpf!(s, "}}");
     }
-    cpf!(s, "}});\n");
+    cpf!(s, ");\n");
     s
 }
 
