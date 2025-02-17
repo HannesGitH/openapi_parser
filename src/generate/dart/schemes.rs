@@ -4,6 +4,8 @@ use super::super::interface::*;
 
 use crate::parse::intermediate;
 
+static empty_str: String = String::new();
+
 pub(super) struct SchemeAdder<'a> {
     class_prefix: &'a str,
     class_suffix: &'a str,
@@ -74,28 +76,35 @@ impl<'a> SchemeAdder<'a> {
             }
             intermediate::IAST::Reference(link) => {
                 let trimmed_link = link.replace("#/components/schemas/", "");
-                (format!("export '{}{}';", trimmed_link, "../".repeat(depth)), vec![])
+                (
+                    format!("export '{}{}';", trimmed_link, "../".repeat(depth)),
+                    vec![],
+                )
             }
             intermediate::IAST::Primitive(annotated_obj) => {
                 let doc_str = mk_doc_str(name, annotated_obj, 0);
                 (
                     match &annotated_obj.value {
                         intermediate::types::Primitive::Enum(allowed_values) => {
-                            let (class_name, content) =
-                                self.generate_primitive_sum_type(name, &doc_str, &allowed_values);
-                                let mut ret = format!(
-                                    "import '../{}utils/serde.dart';\n\n",
-                                    "../".repeat(depth)
-                                );
-                                ret.push_str(&format!(
-                                    "{}typedef {} = {};\n",
-                                    doc_str,
-                                    self.class_name(name),
-                                    class_name
-                                ));
+                            let (class_name, content) = self.generate_primitive_sum_type(
+                                name,
+                                &doc_str,
+                                &allowed_values
+                                    .iter()
+                                    .map(|v| (v.as_str(), empty_str.as_str()))
+                                    .collect::<Vec<(_, _)>>(),
+                            );
+                            let mut ret =
+                                format!("import '../{}utils/serde.dart';\n\n", "../".repeat(depth));
+                            ret.push_str(&format!(
+                                "{}typedef {} = {};\n",
+                                doc_str,
+                                self.class_name(name),
+                                class_name
+                            ));
 
-                                ret.push_str(&content);
-                                ret
+                            ret.push_str(&content);
+                            ret
                         }
                         _ => format!(
                             "{}typedef {} = {};",
@@ -191,42 +200,46 @@ impl<'a> SchemeAdder<'a> {
     }
 
     /// this is an enum
-    fn generate_primitive_sum_type(
+    /// return (enum_name, content)
+    pub(super) fn generate_primitive_sum_type(
         &self,
         name: &str,
         doc_str: &str,
-        allowed_values: &Vec<String>,
+        // (allowed_value, description)
+        allowed_values: &Vec<(&str, &str)>,
     ) -> (String, String) {
         let class_name = format!("{}{}", self.class_prefix, name);
         let allowed_values_str = allowed_values
             .iter()
             .map(|v| {
                 (
-                    v,
-                    v.chars()
-                        .filter(|c| c.is_alphanumeric())
+                    &v.0,
+                    v.0.chars()
+                        .map(|c| if c.is_alphanumeric() { c } else { '_' })
                         .collect::<String>(),
+                    &v.1,
                 )
             })
-            .collect::<Vec<(_, _)>>();
+            .collect::<Vec<(_, _, _)>>();
         let mut content = String::new();
         content.push_str(&format!(
             "\n{}enum {} implements APISerde {{\n",
             doc_str, class_name
         ));
-        for (orig_value, enum_value) in allowed_values_str.iter() {
-            content.push_str(&format!("  ///{}\n", orig_value));
+        for (orig_value, enum_value, desc) in allowed_values_str.iter() {
+            content.push_str(&format!("\n  /// {}\n", orig_value));
+            content.push_str(&format!("  ///{}\n", desc.replace("\n", "\n  ///")));
             content.push_str(&format!("  t_{},\n", enum_value));
         }
         content.push_str(&"\t;\n\n\t@override\n\tdynamic toJson() => switch(this) {\n");
-        for (orig_value, enum_value) in allowed_values_str.iter() {
+        for (orig_value, enum_value, _) in allowed_values_str.iter() {
             content.push_str(&format!("\t\tt_{} => '{}',\n", enum_value, orig_value));
         }
         content.push_str(&format!(
             "\t}};\n\tfactory {}.fromJson(dynamic json) => switch(json) {{\n",
             class_name
         ));
-        for (orig_value, enum_value) in allowed_values_str.iter() {
+        for (orig_value, enum_value, _) in allowed_values_str.iter() {
             content.push_str(&format!("\t\t'{}' => t_{},\n", orig_value, enum_value));
         }
         content.push_str(&format!(
@@ -257,8 +270,14 @@ impl<'a> SchemeAdder<'a> {
                 let prim_type = match &prim.value {
                     intermediate::types::Primitive::Enum(allowed_values) => {
                         let full_name = format!("{}_{}", name, p_name);
-                        let (class_name, content) =
-                            self.generate_primitive_sum_type(&full_name, doc_str, &allowed_values);
+                        let (class_name, content) = self.generate_primitive_sum_type(
+                            &full_name,
+                            doc_str,
+                            &allowed_values
+                                .iter()
+                                .map(|v| (v.as_str(), empty_str.as_str()))
+                                .collect::<Vec<(_, _)>>(),
+                        );
                         extra_content.push_str(&content);
                         class_name
                     }

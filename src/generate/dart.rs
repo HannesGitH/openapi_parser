@@ -25,12 +25,12 @@ impl super::Generator for DartGenerator {
             }
         };
         let scheme_adder = schemes::SchemeAdder::new(class_prefix, class_suffix);
-        let endpoint_adder = endpoints::EndpointAdder;
+        let endpoint_adder = endpoints::EndpointAdder::new(&scheme_adder);
         let mut scheme_files = Vec::new();
         let mut endpoint_files = Vec::new();
         thread::scope(|s| {
             s.spawn(|| {
-                scheme_adder.add_schemes(&mut scheme_files, &intermediate);
+                &scheme_adder.add_schemes(&mut scheme_files, &intermediate);
             });
             s.spawn(|| {
                 endpoint_adder.add_endpoints(&mut endpoint_files, &intermediate);
