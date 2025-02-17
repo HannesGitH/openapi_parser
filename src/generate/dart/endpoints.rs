@@ -98,13 +98,13 @@ impl<'a> EndpointAdder<'a> {
                         path: std::path::PathBuf::from(format!("{}/{}.body.schema.dart", name, method_str)),
                         content,
                     });
-                    format!(", {{required super.body}}")
+                    format!(" {{required super.body}}")
                 },
                 None => String::new(),
             };
 
             param_typedef_strs.push_str(&mk_params(&method.params, &param_name));
-            cpf!(c, "  {}({}{}){{}}", method_str, if method.params.is_empty() { String::new() } else { format!("{} params", param_name) }, body_str);
+            cpf!(c, "  {}({}{}){{}}", method_str, if method.params.is_empty() { String::new() } else { format!("{} params,", param_name) }, body_str);
         }
         cpf!(c, "}}\n");
         c.push_str(&param_typedef_strs);
