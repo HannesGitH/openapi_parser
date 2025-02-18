@@ -10,6 +10,20 @@ pub struct Scheme<'a> {
     pub obj: IAST<'a>,
 }
 
+pub enum RouteFragment{
+    Node(RouteFragmentNodeData),
+    Leaf(RouteFragmentLeafData),
+}
+
+pub struct RouteFragmentNodeData{
+    pub path_fragment_name : String,
+    pub is_param : bool,
+}
+
+pub struct RouteFragmentLeafData{
+    pub additional_params : Vec<String>
+}
+
 pub struct Route<'a> {
     pub path: &'a str,
     pub description: Option<&'a str>,
