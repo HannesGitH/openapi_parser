@@ -142,7 +142,7 @@ impl<'a> EndpointAdder<'a> {
             };
             let (params_1typedef_str, params_as_json_body_str) =
                 &mk_params(&method.params, &param_name);
-            //TODO
+
             let (ret_type_str, ret_is_primitive) = {
                 let responses = &method.responses;
                 if responses.is_empty() {
@@ -180,11 +180,11 @@ impl<'a> EndpointAdder<'a> {
                             _ => (self.scheme_adder.class_name(&response_name), false),
                         }
                     } else {
+                        //TODO
                         ("TODO".to_string(), false)
                     }
                 }
             };
-            //TODO
             let impl_str = {
                 let mut s = String::new();
                 s.push_str(&format!(
