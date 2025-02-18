@@ -2,7 +2,15 @@ use std::collections::{BTreeMap, HashMap};
 
 pub struct IntermediateFormat<'a> {
     pub schemes: Vec<Scheme<'a>>,
+    pub routes_tree: RouteFragment<'a>,
     pub routes: Vec<Route<'a>>,
+}
+
+impl<'a> IntermediateFormat<'a> {
+    pub fn new(schemes: Vec<Scheme<'a>>, routes: Vec<Route<'a>>, convert_routes_to_tree: for<'b> fn(&'b Vec<Route<'b>>) -> RouteFragment<'b>) -> Self {
+        let routes_tree = convert_routes_to_tree(routes.as_ref());
+        Self { schemes, routes_tree, routes }
+    }
 }
 
 pub struct Scheme<'a> {
@@ -10,18 +18,34 @@ pub struct Scheme<'a> {
     pub obj: IAST<'a>,
 }
 
-pub enum RouteFragment{
-    Node(RouteFragmentNodeData),
-    Leaf(RouteFragmentLeafData),
+pub enum RouteFragment<'a> {
+    Node(RouteFragmentNodeData<'a>),
+    Leaf(RouteFragmentLeafData<'a>),
 }
 
-pub struct RouteFragmentNodeData{
-    pub path_fragment_name : String,
-    pub is_param : bool,
+// impl<'a> PartialEq for RouteFragment<'a> {
+//     fn eq(&self, other: &Self) -> bool {
+//         match (self, other) {
+//             (RouteFragment::Node(a), RouteFragment::Node(b)) => a == b,
+//             (RouteFragment::Leaf(_), RouteFragment::Leaf(_)) => true,
+//             _ => false,
+//         }
+//     }
+// }
+pub struct RouteFragmentNodeData<'a> {
+    pub path_fragment_name: String,
+    pub is_param: bool,
+    pub children: Vec<RouteFragment<'a>>,
 }
 
-pub struct RouteFragmentLeafData{
-    pub additional_params : Vec<String>
+// impl<'a> PartialEq for RouteFragmentNodeData<'a> {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.path_fragment_name == other.path_fragment_name
+//     }
+// }
+
+pub struct RouteFragmentLeafData<'a> {
+    pub route: &'a Route<'a>,
 }
 
 pub struct Route<'a> {

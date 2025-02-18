@@ -63,7 +63,7 @@ pub fn parse(spec: &oas3::Spec) -> Result<IntermediateFormat, Error> {
         None => vec![],
     };
 
-    Ok(IntermediateFormat { schemes, routes })
+    Ok(IntermediateFormat::new(schemes, routes, convert_routes_to_tree))
 }
 
 fn parse_params(params: &Vec<ObjectOrReference<Parameter>>) -> Result<Vec<Param>, Error> {
@@ -287,4 +287,61 @@ fn parse_object(object: &ObjectSchema) -> Result<IAST, Error> {
     //     title: object.title.as_deref(),
     //     value: object.properties,
     // }
+}
+
+fn convert_routes_to_tree<'a>(routes: &'a Vec<Route<'a>>) -> RouteFragment<'a> {
+    let mut root_fragment = RouteFragmentNodeData {
+        path_fragment_name: "".to_string(),
+        is_param: false,
+        children: vec![],
+    };
+    let mut branchless_route_trees = Vec::new();
+    // first create a bunch of branchless trees
+    for route in routes {
+        let mut current_node = RouteFragment::Leaf(RouteFragmentLeafData { route: route });
+        for segment in route.path.split('/').rev() {
+            let node = RouteFragment::Node(RouteFragmentNodeData {
+                path_fragment_name: segment.to_string(),
+                is_param: segment.starts_with(':'),
+                children: vec![current_node],
+            });
+            current_node = node;
+        }
+        branchless_route_trees.push(current_node);
+    }
+    // now we need to merge the trees
+
+    for tree in branchless_route_trees {
+        merge_branchless_tree(&mut root_fragment, tree);
+    }
+    RouteFragment::Node(root_fragment)
+}
+
+fn merge_branchless_tree<'a>(
+    main_tree: &mut RouteFragmentNodeData<'a>,
+    branchless_tree: RouteFragment<'a>,
+) {
+    match branchless_tree {
+        RouteFragment::Node(mut branchless_node) => {
+            let mut matched_node = None;
+            for child in main_tree.children.iter_mut() {
+                match child {
+                    RouteFragment::Node(ref mut node) => {
+                        if node.path_fragment_name == branchless_node.path_fragment_name {
+                            matched_node = Some(node);
+                            break;
+                        }
+                    }
+                    RouteFragment::Leaf(_) => {}
+                }
+            }
+            match matched_node {
+                Some(node) => {
+                    merge_branchless_tree(node, branchless_node.children.pop().unwrap());
+                }
+                None => main_tree.children.push(RouteFragment::Node(branchless_node)),
+            }
+        }
+        RouteFragment::Leaf(_) => main_tree.children.push(branchless_tree),
+    }
 }
