@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 
 pub struct IntermediateFormat<'a> {
     pub schemes: Vec<Scheme<'a>>,
-    pub routes_tree: RouteFragment<'a>,
+    pub routes_tree: RouteFragment,
     pub routes: Vec<Route<'a>>,
 }
 
@@ -10,24 +10,13 @@ impl<'a> IntermediateFormat<'a> {
     pub fn new(
         schemes: Vec<Scheme<'a>>,
         routes: Vec<Route<'a>>,
-        convert_routes_to_tree: for<'b> fn(&'b Vec<Route<'b>>) -> RouteFragment<'b>,
+        routes_tree: RouteFragment,
     ) -> Self {
-        let routes_tree = RouteFragment::Node(RouteFragmentNodeData {
-            path_fragment_name: "".to_string(),
-            is_param: false,
-            children: vec![],
-        });
-        let mut fake_self = Self {
+        Self {
             schemes,
             routes_tree,
             routes,
-        };
-        unsafe {
-            let raw_routes = fake_self.routes.as_ptr() as *const Vec<Route<'a>>;
-            let routes_tree = convert_routes_to_tree(&*raw_routes);
-            fake_self.routes_tree = routes_tree;
         }
-        fake_self
     }
 }
 
@@ -36,9 +25,9 @@ pub struct Scheme<'a> {
     pub obj: IAST<'a>,
 }
 
-pub enum RouteFragment<'a> {
-    Node(RouteFragmentNodeData<'a>),
-    Leaf(RouteFragmentLeafData<'a>),
+pub enum RouteFragment {
+    Node(RouteFragmentNodeData),
+    Leaf(RouteFragmentLeafData),
 }
 
 // impl<'a> PartialEq for RouteFragment<'a> {
@@ -50,10 +39,10 @@ pub enum RouteFragment<'a> {
 //         }
 //     }
 // }
-pub struct RouteFragmentNodeData<'a> {
+pub struct RouteFragmentNodeData {
     pub path_fragment_name: String,
     pub is_param: bool,
-    pub children: Vec<RouteFragment<'a>>,
+    pub children: Vec<RouteFragment>,
 }
 
 // impl<'a> PartialEq for RouteFragmentNodeData<'a> {
@@ -62,8 +51,8 @@ pub struct RouteFragmentNodeData<'a> {
 //     }
 // }
 
-pub struct RouteFragmentLeafData<'a> {
-    pub route: &'a Route<'a>,
+pub struct RouteFragmentLeafData {
+    pub route_idx: usize,
 }
 
 pub struct Route<'a> {
