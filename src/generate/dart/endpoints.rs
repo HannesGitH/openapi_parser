@@ -236,6 +236,10 @@ impl<'a> EndpointAdder<'a> {
         fragment: &intermediate::RouteFragment,
         depth: usize,
     ) -> (String, String, Vec<File>) {
+        let name = name
+            .chars()
+            .map(|c| if c.is_alphanumeric() { c } else { '_' })
+            .collect::<String>();
         let mut s = String::new();
         let mut deps = Vec::new();
         let mut imports_str = String::new();
@@ -248,14 +252,29 @@ impl<'a> EndpointAdder<'a> {
         let mut class_name = format!("API{}Frag_{}", name, "unknown");
         match fragment {
             RouteFragment::Node(node) => {
-                class_name = format!("API{}Frag_{}", name, node.path_fragment_name);
+                let sanitized_frag_name = node
+                    .path_fragment_name
+                    .chars()
+                    .map(|c| if c.is_alphanumeric() { c } else { '_' })
+                    .collect::<String>();
+                class_name = format!("API{}Frag_{}", name, sanitized_frag_name);
+
                 let sub_dir_name = format!("{}_frags", node.path_fragment_name);
                 cpf!(s, "class {} extends APIWithParent {{", class_name);
                 cpf!(
                     s,
-                    "\t{}({{required super.parent}}) : super(ownFragment: '{}');",
+                    "\t{}({{required super.parent{}}}) : super(ownFragment: {});\n",
                     class_name,
-                    node.path_fragment_name
+                    if node.is_param {
+                        ", required String param"
+                    } else {
+                        ""
+                    },
+                    if node.is_param {
+                        "param".to_string()
+                    } else {
+                        format!("'{}'", node.path_fragment_name)
+                    }
                 );
                 for child in &node.children {
                     let child_name = format!("{}_{}", name, node.path_fragment_name);
@@ -266,7 +285,29 @@ impl<'a> EndpointAdder<'a> {
                         sub_dir_name,
                         match child {
                             intermediate::RouteFragment::Node(child_node) => {
-                                &child_node.path_fragment_name
+                                let child_frag_name = &child_node.path_fragment_name;
+                                let sanitized_child_frag_name = child_frag_name
+                                    .chars()
+                                    .map(|c| if c.is_alphanumeric() { c } else { '_' })
+                                    .collect::<String>();
+                                if child_node.is_param {
+                                    cpf!(
+                                        s,
+                                        "\t{} {}(String param) => {}(parent: this, param: param);",
+                                        child_class_name,
+                                        sanitized_child_frag_name,
+                                        child_class_name
+                                    );
+                                } else {
+                                    cpf!(
+                                        s,
+                                        "\t{} get {} => {}(parent: this);",
+                                        child_class_name,
+                                        sanitized_child_frag_name,
+                                        child_class_name
+                                    );
+                                };
+                                child_frag_name
                             }
                             intermediate::RouteFragment::Leaf(_) => {
                                 "leaf"
