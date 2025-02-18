@@ -63,7 +63,11 @@ pub fn parse(spec: &oas3::Spec) -> Result<IntermediateFormat, Error> {
         None => vec![],
     };
 
-    Ok(IntermediateFormat::new(schemes, routes, convert_routes_to_tree))
+    Ok(IntermediateFormat::new(
+        schemes, 
+        routes, 
+        convert_routes_to_tree,
+    ))
 }
 
 fn parse_params(params: &Vec<ObjectOrReference<Parameter>>) -> Result<Vec<Param>, Error> {
@@ -296,6 +300,7 @@ fn convert_routes_to_tree<'a>(routes: &'a Vec<Route<'a>>) -> RouteFragment<'a> {
         children: vec![],
     };
     let mut branchless_route_trees = Vec::new();
+    
     // first create a bunch of branchless trees
     for route in routes {
         let mut current_node = RouteFragment::Leaf(RouteFragmentLeafData { route: route });
