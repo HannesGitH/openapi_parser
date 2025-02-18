@@ -71,16 +71,21 @@ fn parse_params(params: &Vec<ObjectOrReference<Parameter>>) -> Result<Vec<Param>
     params
         .iter()
         .map(|param| match param {
-            ObjectOrReference::Object(param) => Ok(Param {
-                name: param.name.as_str(),
-                description: param.description.as_deref(),
-                required: param.required.unwrap_or(false),
-            }),
-            ObjectOrReference::Ref { ref_path, .. } => Err(Error::ParseError(format!(
+            ObjectOrReference::Object(Parameter { name, location, description, required , ..}) => if location==&ParameterIn::Path {
+                None
+            } else {
+                Some(Ok(Param {
+                    name: name.as_str(),
+                    description: description.as_deref(),
+                    required: required.unwrap_or(false),
+                }))
+            }
+            ObjectOrReference::Ref { ref_path, .. } => Some(Err(Error::ParseError(format!(
                 "Reference to {} not supported in params",
                 ref_path
-            ))),
+            )))),
         })
+        .filter_map(|param| param)
         .collect()
 }
 

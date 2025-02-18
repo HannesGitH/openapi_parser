@@ -11,6 +11,7 @@ pub struct EndpointParser<'a> {
     >,
 }
 
+// this could be a function
 #[macro_export]
 macro_rules! handle_endpoint {
     ($parser:expr, $endpoints:expr, $route_part:expr, $method:expr) => {{
