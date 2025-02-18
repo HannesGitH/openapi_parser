@@ -81,10 +81,22 @@ impl<'a> EndpointAdder<'a> {
         let mut all_ret_types_str = String::new();
         cpf!(c, "import '{}endpoints.dart';", "../".repeat(depth));
         cpf!(c, "/// {}", route.path);
-        cpf!(c, "/// {}",route.description.unwrap_or("").replace("\n", "\n/// "));
+        cpf!(
+            c,
+            "/// {}",
+            route.description.unwrap_or("").replace("\n", "\n/// ")
+        );
         cpf!(c, "class API{} extends APIPath {{", name);
-        cpf!(c, "  API{}({{required super.interpolator, required super.handler}})", name);
-        cpf!(c, "    :super(path: APIPathEnum.fromJson('{}'));", route.path);
+        cpf!(
+            c,
+            "  API{}({{required super.interpolator, required super.handler}})",
+            name
+        );
+        cpf!(
+            c,
+            "    :super(path: APIPathEnum.fromJson('{}'));",
+            route.path
+        );
         for method in &route.endpoints {
             let method_str = method.method.string();
             let param_name = format!("_P_{}", method_str);
@@ -92,9 +104,15 @@ impl<'a> EndpointAdder<'a> {
                 Some(request) => {
                     //do things
                     let request_name = format!("{}{}Request", name, method_str);
-                    let (content, sub_deps, not_built) = self.scheme_adder.parse_named_iast(&request_name, request, depth+1);
+                    let (content, sub_deps, not_built) =
+                        self.scheme_adder
+                            .parse_named_iast(&request_name, request, depth + 1);
                     deps.extend(sub_deps.into_iter().map(|f| File {
-                        path: std::path::PathBuf::from(format!("{}/{}", name, f.path.to_str().unwrap())),
+                        path: std::path::PathBuf::from(format!(
+                            "{}/{}",
+                            name,
+                            f.path.to_str().unwrap()
+                        )),
                         content: f.content,
                     }));
                     let dep_path_str = format!("{}/{}.req.body.schema.dart", name, method_str);
@@ -105,15 +123,25 @@ impl<'a> EndpointAdder<'a> {
                     });
                     imports_str.push_str(&format!("import '{}';\n", &dep_path_str));
                     let body_type_str = match not_built {
-                        Some(schemes::NotBuiltData {reason, type_name}) => (type_name, reason == NotBuiltReason::Primitive),
+                        Some(schemes::NotBuiltData { reason, type_name }) => {
+                            (type_name, reason == NotBuiltReason::Primitive)
+                        }
                         _ => (self.scheme_adder.class_name(&request_name), false),
                     };
-                    (Some(format!(" {{required {} body}}", body_type_str.0)), body_type_str.1)
-                },
+                    (
+                        Some(format!(" {{required {} body}}", body_type_str.0)),
+                        body_type_str.1,
+                    )
+                }
                 None => (None, true),
             };
-            let params_str = if method.params.is_empty() { String::new() } else { format!("{} params,", param_name) };
-            let (params_1typedef_str, params_as_json_body_str) = &mk_params(&method.params, &param_name);
+            let params_str = if method.params.is_empty() {
+                String::new()
+            } else {
+                format!("{} params,", param_name)
+            };
+            let (params_1typedef_str, params_as_json_body_str) =
+                &mk_params(&method.params, &param_name);
             //TODO
             let (ret_type_str, ret_is_primitive) = {
                 let responses = &method.responses;
@@ -123,20 +151,32 @@ impl<'a> EndpointAdder<'a> {
                     let response_name = format!("{}_{}Response", name, method_str);
                     if responses.len() == 1 {
                         let (response_code, response) = responses.first_key_value().unwrap();
-                        let (content, sub_deps, not_built) = self.scheme_adder.parse_named_iast(&response_name, &response, depth+1);
-                        let dep_path_str = format!("{}/{}.resp.{}.schema.dart", name, method_str, response_code);
+                        let (content, sub_deps, not_built) = self.scheme_adder.parse_named_iast(
+                            &response_name,
+                            &response,
+                            depth + 1,
+                        );
+                        let dep_path_str =
+                            format!("{}/{}.resp.{}.schema.dart", name, method_str, response_code);
                         let dep_path = std::path::PathBuf::from(&dep_path_str);
                         deps.push(File {
                             path: dep_path,
                             content: content,
                         });
                         deps.extend(sub_deps.into_iter().map(|f| File {
-                            path: std::path::PathBuf::from(format!("{}/{}", name, f.path.to_str().unwrap())),
+                            path: std::path::PathBuf::from(format!(
+                                "{}/{}",
+                                name,
+                                f.path.to_str().unwrap()
+                            )),
                             content: f.content,
                         }));
                         imports_str.push_str(&format!("import '{}';\n", &dep_path_str));
                         match not_built {
-                            Some(schemes::NotBuiltData {reason: _, type_name}) => (type_name, true),
+                            Some(schemes::NotBuiltData {
+                                reason: _,
+                                type_name,
+                            }) => (type_name, true),
                             _ => (self.scheme_adder.class_name(&response_name), false),
                         }
                     } else {
@@ -147,7 +187,10 @@ impl<'a> EndpointAdder<'a> {
             //TODO
             let impl_str = {
                 let mut s = String::new();
-                s.push_str(&format!("\n\t\t{}", params_as_json_body_str.replace("\n", "\n\t\t")));
+                s.push_str(&format!(
+                    "\n\t\t{}",
+                    params_as_json_body_str.replace("\n", "\n\t\t")
+                ));
                 cpf!(s, "\t\treturn handle(method: APIRequestMethod.{}, params: paramsJson, body: {}).then((json) => {});", method_str,match (&body_str, &body_is_primitive) {
                     (Some(_), true) => "body",
                     (Some(_), false) => "body.toJson()",
@@ -157,10 +200,18 @@ impl<'a> EndpointAdder<'a> {
             };
 
             param_typedef_strs.push_str(&params_1typedef_str);
-            cpf!(c, "  Future<{}> {}({}{}){{{}\t}}", ret_type_str, method_str, params_str, match &body_str {
-                Some(body_str) => body_str,
-                None => "",
-            }, impl_str);
+            cpf!(
+                c,
+                "  Future<{}> {}({}{}){{{}\t}}",
+                ret_type_str,
+                method_str,
+                params_str,
+                match &body_str {
+                    Some(body_str) => body_str,
+                    None => "",
+                },
+                impl_str
+            );
         }
         cpf!(c, "}}\n");
         c.push_str(&param_typedef_strs);
@@ -178,9 +229,29 @@ fn mk_params(params: &[intermediate::Param], name: &str) -> (String, String) {
     if !params.is_empty() {
         cpf!(s_typedef, "{{");
         for p in params {
-            cpf!(s_typedef, "  /// {}", p.description.unwrap_or("").replace("\n", "\n  /// "));
-            cpf!(s_typedef, "  String{} {},", if p.required { "" } else { "?" }, p.name);
-            cpf!(s_as_json_body, "  {}'{}': params.{}{},", if p.required { String::new() } else { format!("if (params.{} != null) ", p.name) }, p.name, p.name, if p.required { "" } else { "!" });
+            cpf!(
+                s_typedef,
+                "  /// {}",
+                p.description.unwrap_or("").replace("\n", "\n  /// ")
+            );
+            cpf!(
+                s_typedef,
+                "  String{} {},",
+                if p.required { "" } else { "?" },
+                p.name
+            );
+            cpf!(
+                s_as_json_body,
+                "  {}'{}': params.{}{},",
+                if p.required {
+                    String::new()
+                } else {
+                    format!("if (params.{} != null) ", p.name)
+                },
+                p.name,
+                p.name,
+                if p.required { "" } else { "!" }
+            );
         }
         cpf!(s_typedef, "}}");
     }
