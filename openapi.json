@@ -3,6 +3,175 @@
   "info": { "title": "Bling API", "version": "1.0.0" },
   "components": {
     "schemas": {
+      "CardsActivatePostRespBody": {
+        "type": "object",
+        "properties": {
+          "cardId": { "type": "number" },
+          "cardType": { "type": "string", "enum": ["kidcard", "adultcard"] },
+          "status": {
+            "type": "string",
+            "enum": ["shipping", "active", "locked", "preorder"]
+          },
+          "isLive": {
+            "type": "boolean",
+            "description": "Indicates whether the card was activated. Initially set to `false` when the card is created. The card is printed and shipped to the user. It changes to `true` once the user activates the card using the \"publicToken\"."
+          },
+          "isLockedBySystem": { "type": "boolean" },
+          "isPinTryExceeds": {
+            "type": "boolean",
+            "description": "Entering 3 erroneous PIN codes in a row blocks the PIN and sets the \"isPinTryExceeds\" to `true`."
+          },
+          "options": {
+            "type": "object",
+            "properties": {
+              "onlineEnabled": { "type": "boolean" },
+              "nfcEnabled": { "type": "boolean" },
+              "atmEnabled": { "type": "boolean" },
+              "foreignEnabled": { "type": "boolean" },
+              "paymentWeeklyLimit": { "type": "number", "exclusiveMinimum": 0 },
+              "atmWeeklyLimit": { "type": "number", "exclusiveMinimum": 0 }
+            },
+            "required": [
+              "onlineEnabled",
+              "nfcEnabled",
+              "atmEnabled",
+              "foreignEnabled",
+              "paymentWeeklyLimit",
+              "atmWeeklyLimit"
+            ],
+            "additionalProperties": false
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "atmWeekly": {
+                "type": "object",
+                "properties": {
+                  "amountUsed": { "type": ["number", "null"] },
+                  "configuredLimit": {
+                    "type": "number",
+                    "description": "The limit that the user has configured, e.g. the parent decided that the child is not allowed to withdraw more than 100€ per week from the ATM",
+                    "example": 100
+                  },
+                  "maximumLimit": {
+                    "type": "number",
+                    "description": "\nThe maximum limit that Bling/Treezor/Regulators think is appropriate, e.g. the maximum slider value in the app.\n\nSometimes that maximum limit can be increased by contacting the support. If approved, this value will be increased.\n\n    ",
+                    "example": 300
+                  }
+                },
+                "required": ["amountUsed", "configuredLimit", "maximumLimit"],
+                "additionalProperties": false
+              },
+              "atmMonthly": {
+                "type": "object",
+                "properties": {
+                  "amountUsed": { "type": ["number", "null"] },
+                  "configuredLimit": {
+                    "type": "number",
+                    "description": "The limit that the user has configured, e.g. the parent decided that the child is not allowed to withdraw more than 100€ per week from the ATM",
+                    "example": 100
+                  },
+                  "maximumLimit": {
+                    "type": "number",
+                    "description": "\nThe maximum limit that Bling/Treezor/Regulators think is appropriate, e.g. the maximum slider value in the app.\n\nSometimes that maximum limit can be increased by contacting the support. If approved, this value will be increased.\n\n    ",
+                    "example": 300
+                  }
+                },
+                "required": ["amountUsed", "configuredLimit", "maximumLimit"],
+                "additionalProperties": false
+              },
+              "paymentWeekly": {
+                "type": "object",
+                "properties": {
+                  "amountUsed": { "type": ["number", "null"] },
+                  "configuredLimit": {
+                    "type": "number",
+                    "description": "The limit that the user has configured, e.g. the parent decided that the child is not allowed to withdraw more than 100€ per week from the ATM",
+                    "example": 100
+                  },
+                  "maximumLimit": {
+                    "type": "number",
+                    "description": "\nThe maximum limit that Bling/Treezor/Regulators think is appropriate, e.g. the maximum slider value in the app.\n\nSometimes that maximum limit can be increased by contacting the support. If approved, this value will be increased.\n\n    ",
+                    "example": 300
+                  }
+                },
+                "required": ["amountUsed", "configuredLimit", "maximumLimit"],
+                "additionalProperties": false
+              },
+              "paymentPerTransaction": {
+                "type": "object",
+                "properties": {
+                  "amountUsed": { "type": "null" },
+                  "configuredLimit": {
+                    "type": "number",
+                    "description": "The limit that the user has configured, e.g. the parent decided that the child is not allowed to withdraw more than 100€ per week from the ATM",
+                    "example": 100
+                  },
+                  "maximumLimit": {
+                    "type": "number",
+                    "description": "\nThe maximum limit that Bling/Treezor/Regulators think is appropriate, e.g. the maximum slider value in the app.\n\nSometimes that maximum limit can be increased by contacting the support. If approved, this value will be increased.\n\n    ",
+                    "example": 300
+                  }
+                },
+                "required": ["amountUsed", "configuredLimit", "maximumLimit"],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "atmWeekly",
+              "atmMonthly",
+              "paymentWeekly",
+              "paymentPerTransaction"
+            ],
+            "additionalProperties": false
+          },
+          "maskedPan": { "type": "string" },
+          "expiryDate": { "type": "string" },
+          "shipmentTracking": {
+            "type": ["object", "null"],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": ["ordered", "shipped", "estimatedArrived"]
+              },
+              "title": { "type": "string" },
+              "infoText": { "type": "string" },
+              "supportText": { "type": ["string", "null"] }
+            },
+            "required": ["status", "title", "infoText", "supportText"],
+            "additionalProperties": false
+          },
+          "dateCreated": { "type": "string" },
+          "dateShipped": { "type": ["string", "null"] },
+          "dateActivated": { "type": ["string", "null"] }
+        },
+        "required": [
+          "cardId",
+          "cardType",
+          "status",
+          "isLive",
+          "isLockedBySystem",
+          "isPinTryExceeds",
+          "options",
+          "limits",
+          "maskedPan",
+          "expiryDate",
+          "shipmentTracking",
+          "dateCreated",
+          "dateShipped",
+          "dateActivated"
+        ],
+        "additionalProperties": false
+      },
+      "CardsActivatePostReqBody": {
+        "type": "object",
+        "properties": {
+          "publicToken": { "type": "string", "pattern": "^[0-9]{9}$" }
+        },
+        "required": ["publicToken"],
+        "additionalProperties": false,
+        "examples": [{ "publicToken": "100000000" }]
+      },
       "CardsMeGetRespBody": {
         "type": "object",
         "properties": {
@@ -196,6 +365,166 @@
           }
         },
         "required": ["cards"],
+        "additionalProperties": false
+      },
+      "CardsOptionLockPostRespBody": {
+        "type": "object",
+        "properties": {
+          "cardId": { "type": "number" },
+          "cardType": { "type": "string", "enum": ["kidcard", "adultcard"] },
+          "status": {
+            "type": "string",
+            "enum": ["shipping", "active", "locked", "preorder"]
+          },
+          "isLive": {
+            "type": "boolean",
+            "description": "Indicates whether the card was activated. Initially set to `false` when the card is created. The card is printed and shipped to the user. It changes to `true` once the user activates the card using the \"publicToken\"."
+          },
+          "isLockedBySystem": { "type": "boolean" },
+          "isPinTryExceeds": {
+            "type": "boolean",
+            "description": "Entering 3 erroneous PIN codes in a row blocks the PIN and sets the \"isPinTryExceeds\" to `true`."
+          },
+          "options": {
+            "type": "object",
+            "properties": {
+              "onlineEnabled": { "type": "boolean" },
+              "nfcEnabled": { "type": "boolean" },
+              "atmEnabled": { "type": "boolean" },
+              "foreignEnabled": { "type": "boolean" },
+              "paymentWeeklyLimit": { "type": "number", "exclusiveMinimum": 0 },
+              "atmWeeklyLimit": { "type": "number", "exclusiveMinimum": 0 }
+            },
+            "required": [
+              "onlineEnabled",
+              "nfcEnabled",
+              "atmEnabled",
+              "foreignEnabled",
+              "paymentWeeklyLimit",
+              "atmWeeklyLimit"
+            ],
+            "additionalProperties": false
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "atmWeekly": {
+                "type": "object",
+                "properties": {
+                  "amountUsed": { "type": ["number", "null"] },
+                  "configuredLimit": {
+                    "type": "number",
+                    "description": "The limit that the user has configured, e.g. the parent decided that the child is not allowed to withdraw more than 100€ per week from the ATM",
+                    "example": 100
+                  },
+                  "maximumLimit": {
+                    "type": "number",
+                    "description": "\nThe maximum limit that Bling/Treezor/Regulators think is appropriate, e.g. the maximum slider value in the app.\n\nSometimes that maximum limit can be increased by contacting the support. If approved, this value will be increased.\n\n    ",
+                    "example": 300
+                  }
+                },
+                "required": ["amountUsed", "configuredLimit", "maximumLimit"],
+                "additionalProperties": false
+              },
+              "atmMonthly": {
+                "type": "object",
+                "properties": {
+                  "amountUsed": { "type": ["number", "null"] },
+                  "configuredLimit": {
+                    "type": "number",
+                    "description": "The limit that the user has configured, e.g. the parent decided that the child is not allowed to withdraw more than 100€ per week from the ATM",
+                    "example": 100
+                  },
+                  "maximumLimit": {
+                    "type": "number",
+                    "description": "\nThe maximum limit that Bling/Treezor/Regulators think is appropriate, e.g. the maximum slider value in the app.\n\nSometimes that maximum limit can be increased by contacting the support. If approved, this value will be increased.\n\n    ",
+                    "example": 300
+                  }
+                },
+                "required": ["amountUsed", "configuredLimit", "maximumLimit"],
+                "additionalProperties": false
+              },
+              "paymentWeekly": {
+                "type": "object",
+                "properties": {
+                  "amountUsed": { "type": ["number", "null"] },
+                  "configuredLimit": {
+                    "type": "number",
+                    "description": "The limit that the user has configured, e.g. the parent decided that the child is not allowed to withdraw more than 100€ per week from the ATM",
+                    "example": 100
+                  },
+                  "maximumLimit": {
+                    "type": "number",
+                    "description": "\nThe maximum limit that Bling/Treezor/Regulators think is appropriate, e.g. the maximum slider value in the app.\n\nSometimes that maximum limit can be increased by contacting the support. If approved, this value will be increased.\n\n    ",
+                    "example": 300
+                  }
+                },
+                "required": ["amountUsed", "configuredLimit", "maximumLimit"],
+                "additionalProperties": false
+              },
+              "paymentPerTransaction": {
+                "type": "object",
+                "properties": {
+                  "amountUsed": { "type": "null" },
+                  "configuredLimit": {
+                    "type": "number",
+                    "description": "The limit that the user has configured, e.g. the parent decided that the child is not allowed to withdraw more than 100€ per week from the ATM",
+                    "example": 100
+                  },
+                  "maximumLimit": {
+                    "type": "number",
+                    "description": "\nThe maximum limit that Bling/Treezor/Regulators think is appropriate, e.g. the maximum slider value in the app.\n\nSometimes that maximum limit can be increased by contacting the support. If approved, this value will be increased.\n\n    ",
+                    "example": 300
+                  }
+                },
+                "required": ["amountUsed", "configuredLimit", "maximumLimit"],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "atmWeekly",
+              "atmMonthly",
+              "paymentWeekly",
+              "paymentPerTransaction"
+            ],
+            "additionalProperties": false
+          },
+          "maskedPan": { "type": "string" },
+          "expiryDate": { "type": "string" },
+          "shipmentTracking": {
+            "type": ["object", "null"],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": ["ordered", "shipped", "estimatedArrived"]
+              },
+              "title": { "type": "string" },
+              "infoText": { "type": "string" },
+              "supportText": { "type": ["string", "null"] }
+            },
+            "required": ["status", "title", "infoText", "supportText"],
+            "additionalProperties": false
+          },
+          "dateCreated": { "type": "string" },
+          "dateShipped": { "type": ["string", "null"] },
+          "dateActivated": { "type": ["string", "null"] }
+        },
+        "required": [
+          "cardId",
+          "cardType",
+          "status",
+          "isLive",
+          "isLockedBySystem",
+          "isPinTryExceeds",
+          "options",
+          "limits",
+          "maskedPan",
+          "expiryDate",
+          "shipmentTracking",
+          "dateCreated",
+          "dateShipped",
+          "dateActivated"
+        ],
         "additionalProperties": false
       },
       "CardsOptionsGetRespBody": {
@@ -920,6 +1249,33 @@
     "parameters": {}
   },
   "paths": {
+    "/v2/cards/activate": {
+      "post": {
+        "summary": "Activates the card of the user",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CardsActivatePostReqBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardsActivatePostRespBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v2/cards/me/{userId}": {
       "get": {
         "summary": "Find all the cards of a user",
@@ -929,6 +1285,23 @@
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/CardsMeGetRespBody" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/cards/options/:cardId/lock": {
+      "post": {
+        "summary": "Lock the card of the user",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardsOptionLockPostRespBody"
+                }
               }
             }
           }

@@ -1,6 +1,6 @@
 use crate::{
     generate::{dart::schemes::NotBuiltReason, File},
-    parse::intermediate::{self, Route},
+    parse::intermediate::{self, Route, RouteFragmentLeafData},
 };
 
 use super::schemes;
@@ -50,8 +50,12 @@ impl<'a> EndpointAdder<'a> {
             }));
         }
 
-        let (frag_class_name, frag_content, frag_deps) =
-            self.generate_route_fragment("root", &intermediate.routes_tree, 0);
+        let (frag_class_name, frag_content, frag_deps) = self.generate_route_fragment(
+            "root",
+            &intermediate.routes_tree,
+            &intermediate.routes,
+            0,
+        );
         let root_frag_file_name = "root_fragment.dart";
         out_files.push(File {
             path: std::path::PathBuf::from(root_frag_file_name),
@@ -189,7 +193,10 @@ impl<'a> EndpointAdder<'a> {
                             _ => (self.scheme_adder.class_name(&response_name), false),
                         }
                     } else {
-                        ("//TODO: add parser for multiple responses".to_string(), false)
+                        (
+                            "//TODO: add parser for multiple responses".to_string(),
+                            false,
+                        )
                     }
                 }
             };
@@ -208,8 +215,16 @@ impl<'a> EndpointAdder<'a> {
             };
 
             param_typedef_strs.push_str(&params_1typedef_str);
-            cpf!(c, "\n\t///{}\n\t///", method.summary.unwrap_or("").replace("\n", "\n\t/// "));
-            cpf!(c, "\t///{}", method.description.unwrap_or("").replace("\n", "\n\t/// "));
+            cpf!(
+                c,
+                "\n\t///{}\n\t///",
+                method.summary.unwrap_or("").replace("\n", "\n\t/// ")
+            );
+            cpf!(
+                c,
+                "\t///{}",
+                method.description.unwrap_or("").replace("\n", "\n\t/// ")
+            );
             cpf!(
                 c,
                 "  Future<{}> {}({}{}){{{}\t}}",
@@ -235,6 +250,7 @@ impl<'a> EndpointAdder<'a> {
         &self,
         name: &str,
         fragment: &intermediate::RouteFragment,
+        routes: &[Route],
         depth: usize,
     ) -> (String, String, Vec<File>) {
         let name = name
@@ -280,7 +296,7 @@ impl<'a> EndpointAdder<'a> {
                 for child in &node.children {
                     let child_name = format!("{}_{}", name, node.path_fragment_name);
                     let (child_class_name, child_str, child_deps) =
-                        self.generate_route_fragment(&child_name, child, depth + 1);
+                        self.generate_route_fragment(&child_name, child, routes, depth + 1);
                     let child_file_name = format!(
                         "{}/{}.dart",
                         sub_dir_name,
@@ -332,8 +348,17 @@ impl<'a> EndpointAdder<'a> {
                 }
                 cpf!(s, "}}\n");
             }
-            RouteFragment::Leaf(leaf) => {
-                s.push_str(&format!("//TODO: {}", leaf.route_idx));
+            RouteFragment::Leaf(RouteFragmentLeafData { route_idx }) => {
+                let route = &routes[*route_idx];
+                s.push_str(&format!(
+                    "export '{}routes/{}.dart';",
+                    "../".repeat(depth),
+                    route
+                        .path
+                        .chars()
+                        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+                        .collect::<String>()
+                ));
             }
         };
         imports_str.push_str(&s);
