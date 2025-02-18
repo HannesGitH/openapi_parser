@@ -1,8 +1,8 @@
 abstract interface class JsonRequestHandler {
-  Future<Map<String, dynamic>> handle({
+  Future<dynamic> handle({
     required APIRequestMethod method,
     required String path,
-    Map<String, dynamic> body,
+    dynamic body,
   });
 }
 
@@ -31,10 +31,10 @@ abstract class APIPath {
   APIPath(
       {required this.path, required this.interpolator, required this.handler});
 
-  Future<Map<String, dynamic>> handle({
+  Future<dynamic> handle({
     required APIRequestMethod method,
     Map<String, String> params = const {},
-    Map<String, dynamic> body = const {},
+    dynamic body = const {},
   }) {
     final pathString = interpolator.interpolate(path, params);
     return handler.handle(method: method, path: pathString, body: body);

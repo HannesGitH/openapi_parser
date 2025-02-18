@@ -1,5 +1,5 @@
 use crate::{
-    generate::File,
+    generate::{dart::schemes::NotBuiltReason, File},
     parse::intermediate::{self, Route},
 };
 
@@ -88,7 +88,7 @@ impl<'a> EndpointAdder<'a> {
         for method in &route.endpoints {
             let method_str = method.method.string();
             let param_name = format!("_P_{}", method_str);
-            let body_str = match &method.request {
+            let (body_str, body_is_primitive) = match &method.request {
                 Some(request) => {
                     //do things
                     let request_name = format!("{}{}Request", name, method_str);
@@ -105,20 +105,20 @@ impl<'a> EndpointAdder<'a> {
                     });
                     imports_str.push_str(&format!("import '{}';\n", &dep_path_str));
                     let body_type_str = match not_built {
-                        Some(schemes::NotBuiltData {reason: _, type_name}) => type_name,
-                        _ => self.scheme_adder.class_name(&request_name),
+                        Some(schemes::NotBuiltData {reason, type_name}) => (type_name, reason == NotBuiltReason::Primitive),
+                        _ => (self.scheme_adder.class_name(&request_name), false),
                     };
-                    format!(" {{required {} body}}", body_type_str)
+                    (Some(format!(" {{required {} body}}", body_type_str.0)), body_type_str.1)
                 },
-                None => String::new(),
+                None => (None, true),
             };
             let params_str = if method.params.is_empty() { String::new() } else { format!("{} params,", param_name) };
             let (params_1typedef_str, params_as_json_body_str) = &mk_params(&method.params, &param_name);
             //TODO
-            let ret_type_str = {
+            let (ret_type_str, ret_is_primitive) = {
                 let responses = &method.responses;
                 if responses.is_empty() {
-                    "void".to_string()
+                    ("()".to_string(), true)
                 } else {
                     let response_name = format!("{}_{}Response", name, method_str);
                     if responses.len() == 1 {
@@ -136,24 +136,31 @@ impl<'a> EndpointAdder<'a> {
                         }));
                         imports_str.push_str(&format!("import '{}';\n", &dep_path_str));
                         match not_built {
-                            Some(schemes::NotBuiltData {reason: _, type_name}) => type_name,
-                            _ => self.scheme_adder.class_name(&response_name),
+                            Some(schemes::NotBuiltData {reason: _, type_name}) => (type_name, true),
+                            _ => (self.scheme_adder.class_name(&response_name), false),
                         }
                     } else {
-                        "TODO".to_string()
+                        ("TODO".to_string(), false)
                     }
                 }
             };
             //TODO
             let impl_str = {
                 let mut s = String::new();
-                cpf!(s, "\n\t\t{}", params_as_json_body_str.replace("\n", "\n\t\t"));
-                cpf!(s, "\t\treturn handle(method: APIRequestMethod.{}, params: paramsJson, body: body.toJson()).then((json) => {}.fromJson(json));", method_str, ret_type_str);
+                s.push_str(&format!("\n\t\t{}", params_as_json_body_str.replace("\n", "\n\t\t")));
+                cpf!(s, "\t\treturn handle(method: APIRequestMethod.{}, params: paramsJson, body: {}).then((json) => {});", method_str,match (&body_str, &body_is_primitive) {
+                    (Some(_), true) => "body",
+                    (Some(_), false) => "body.toJson()",
+                    (None, _) => "null",
+                }, if ret_is_primitive { "json".to_string() } else { format!("{}.fromJson(json)", ret_type_str) });
                 s
             };
 
             param_typedef_strs.push_str(&params_1typedef_str);
-            cpf!(c, "  Future<{}> {}({}{}){{{}\t}}", ret_type_str, method_str, params_str, body_str, impl_str);
+            cpf!(c, "  Future<{}> {}({}{}){{{}\t}}", ret_type_str, method_str, params_str, match &body_str {
+                Some(body_str) => body_str,
+                None => "",
+            }, impl_str);
         }
         cpf!(c, "}}\n");
         c.push_str(&param_typedef_strs);
@@ -167,13 +174,13 @@ fn mk_params(params: &[intermediate::Param], name: &str) -> (String, String) {
     let mut s_typedef = String::new();
     let mut s_as_json_body = String::new();
     cpf!(s_typedef, "typedef {} = (", name);
-    cpf!(s_as_json_body, "final paramsJson = {{");
+    cpf!(s_as_json_body, "final Map<String, String> paramsJson = {{");
     if !params.is_empty() {
         cpf!(s_typedef, "{{");
         for p in params {
             cpf!(s_typedef, "  /// {}", p.description.unwrap_or("").replace("\n", "\n  /// "));
             cpf!(s_typedef, "  String{} {},", if p.required { "" } else { "?" }, p.name);
-            cpf!(s_as_json_body, "  {}'{}': params.{},", if p.required { String::new() } else { format!("if (params.{} != null) ", p.name) }, p.name, p.name);
+            cpf!(s_as_json_body, "  {}'{}': params.{}{},", if p.required { String::new() } else { format!("if (params.{} != null) ", p.name) }, p.name, p.name, if p.required { "" } else { "!" });
         }
         cpf!(s_typedef, "}}");
     }

@@ -511,6 +511,7 @@ pub(super) struct NotBuiltData {
     pub type_name: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum NotBuiltReason {
     Primitive,
     Link(String),
