@@ -40,3 +40,28 @@ abstract class APIPath {
     return handler.handle(method: method, path: pathString, body: body);
   }
 }
+
+//TODO: this is the root API
+class API extends APIHasPath {
+  APIrootFragment get root => APIrootFragment(parent: this);
+  API();
+
+  APIrootFragment call() => root;
+
+  @override
+  String get path => '';
+}
+
+abstract interface class APIHasPath {
+  String get path;
+}
+
+abstract class APIWithParent implements APIHasPath {
+  final APIHasPath parent;
+  final String ownFragment;
+
+  APIWithParent({required this.parent, required this.ownFragment});
+
+  @override
+  String get path => "${parent.path}/$ownFragment";
+}

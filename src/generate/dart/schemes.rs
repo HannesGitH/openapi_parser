@@ -4,6 +4,7 @@ use super::super::interface::*;
 
 use crate::parse::intermediate;
 
+#[allow(non_upper_case_globals)]
 static empty_str: String = String::new();
 
 pub(super) struct SchemeAdder<'a> {

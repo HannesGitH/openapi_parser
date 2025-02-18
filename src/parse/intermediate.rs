@@ -64,11 +64,7 @@ pub fn parse(spec: &oas3::Spec) -> Result<IntermediateFormat, Error> {
     };
 
     let routes_tree = convert_routes_to_tree(&routes);
-    Ok(IntermediateFormat::new(
-        schemes, 
-        routes, 
-        routes_tree,
-    ))
+    Ok(IntermediateFormat::new(schemes, routes, routes_tree))
 }
 
 fn parse_params(params: &Vec<ObjectOrReference<Parameter>>) -> Result<Vec<Param>, Error> {
@@ -284,14 +280,6 @@ fn parse_object(object: &ObjectSchema) -> Result<IAST, Error> {
         title: object.title.as_deref(),
         value: Primitive::Never,
     }))
-
-    // AnnotatedObj {
-    //     nullable: object.nullable,
-    //     is_deprecated: object.deprecated.unwrap_or(false),
-    //     description: object.description.as_deref(),
-    //     title: object.title.as_deref(),
-    //     value: object.properties,
-    // }
 }
 
 fn convert_routes_to_tree<'a>(routes: &Vec<Route>) -> RouteFragment {
@@ -301,14 +289,24 @@ fn convert_routes_to_tree<'a>(routes: &Vec<Route>) -> RouteFragment {
         children: vec![],
     };
     let mut branchless_route_trees = Vec::new();
-    
+
     // first create a bunch of branchless trees
     for (idx, route) in routes.iter().enumerate() {
         let mut current_node = RouteFragment::Leaf(RouteFragmentLeafData { route_idx: idx });
         for segment in route.path.split('/').rev() {
+            if segment.is_empty() {
+                continue;
+            }
+            let is_param =
+                segment.starts_with(':') || segment.starts_with('{') && segment.ends_with('}');
+            let sanitized_segment = segment
+                .trim_matches(':')
+                .trim_matches('{')
+                .trim_matches('}');
+
             let node = RouteFragment::Node(RouteFragmentNodeData {
-                path_fragment_name: segment.to_string(),
-                is_param: segment.starts_with(':'),
+                path_fragment_name: sanitized_segment.to_string(),
+                is_param,
                 children: vec![current_node],
             });
             current_node = node;
@@ -323,10 +321,7 @@ fn convert_routes_to_tree<'a>(routes: &Vec<Route>) -> RouteFragment {
     RouteFragment::Node(root_fragment)
 }
 
-fn merge_branchless_tree(
-    main_tree: &mut RouteFragmentNodeData,
-    branchless_tree: RouteFragment,
-) {
+fn merge_branchless_tree(main_tree: &mut RouteFragmentNodeData, branchless_tree: RouteFragment) {
     match branchless_tree {
         RouteFragment::Node(mut branchless_node) => {
             let mut matched_node = None;
@@ -345,7 +340,9 @@ fn merge_branchless_tree(
                 Some(node) => {
                     merge_branchless_tree(node, branchless_node.children.pop().unwrap());
                 }
-                None => main_tree.children.push(RouteFragment::Node(branchless_node)),
+                None => main_tree
+                    .children
+                    .push(RouteFragment::Node(branchless_node)),
             }
         }
         RouteFragment::Leaf(_) => main_tree.children.push(branchless_tree),

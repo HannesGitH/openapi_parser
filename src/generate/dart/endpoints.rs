@@ -50,9 +50,23 @@ impl<'a> EndpointAdder<'a> {
             }));
         }
 
+
+        let (frag_content, frag_deps) = self.generate_route_fragment(
+            "root",
+            &intermediate.routes_tree,
+            0,
+        );
+        let root_frag_file_name ="root_fragment.dart";
+        out_files.push(File {
+            path: std::path::PathBuf::from(root_frag_file_name),
+            content: frag_content,
+        });
+        out_files.extend(frag_deps);
+
+
         let mut imports_content = String::new();
         imports_content.push_str(&include_str!("endpoints/imports.dart"));
-
+        cpf!(imports_content, "import '{}';", root_frag_file_name);
         let mut content = String::new();
         content.push_str(&imports_content);
         content.push_str(&format!("typedef APIPathEnum={};\n", path_enum_name));
@@ -219,6 +233,50 @@ impl<'a> EndpointAdder<'a> {
         imports_str.push_str(&c);
         (imports_str, deps)
     }
+
+    fn generate_route_fragment(
+        &self,
+        name: &str,
+        fragment: &intermediate::RouteFragment,
+        depth: usize,
+    ) -> (String, Vec<File>) {
+        let mut s = String::new();
+        let mut deps = Vec::new();
+        let mut imports_str = String::new();
+        cpf!(imports_str, "import '{}endpoints.dart';", "../".repeat(depth));
+        use intermediate::RouteFragment;
+        match fragment {
+            RouteFragment::Node(node) => {
+                let sub_dir_name = format!("{}_frags", node.path_fragment_name);
+                cpf!(s, "class API{}Fragment extends APIWithParent {{\n", name);
+                for child in &node.children {
+                    let child_name = format!("{}_{}", name, node.path_fragment_name);
+                    let (child_str, child_deps) =
+                        self.generate_route_fragment(&child_name, child, depth + 1);
+                    let child_file_name = format!("{}/{}.dart", sub_dir_name, match child {
+                        intermediate::RouteFragment::Node(node) => &node.path_fragment_name,
+                        intermediate::RouteFragment::Leaf(_) => "leaf",
+                    });
+                    let sub_frag_file = File {
+                        path: std::path::PathBuf::from(&child_file_name),
+                        content: child_str,
+                    };
+                    deps.extend(child_deps.into_iter().map(|f| File {
+                        path: std::path::PathBuf::from(format!("{}/{}", sub_dir_name, f.path.to_str().unwrap())),
+                        content: f.content,
+                    }));
+                    deps.push(sub_frag_file);
+                    imports_str.push_str(&format!("import '{}';\n", child_file_name));
+                }
+                cpf!(s, "}}\n");
+            }
+            RouteFragment::Leaf(leaf) => {
+                s.push_str(&format!("//TODO: {}", leaf.route_idx));
+            }
+        };
+        imports_str.push_str(&s);
+        (imports_str, deps)
+    }
 }
 
 fn mk_params(params: &[intermediate::Param], name: &str) -> (String, String) {
@@ -261,6 +319,7 @@ fn mk_params(params: &[intermediate::Param], name: &str) -> (String, String) {
 }
 
 impl intermediate::Method {
+    #[allow(dead_code)]
     fn enum_string(&self) -> String {
         format!("APIRequestMethod.{}", self.string())
     }
