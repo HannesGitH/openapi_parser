@@ -8,19 +8,28 @@ pub struct IntermediateFormat<'a> {
 
 impl<'a> IntermediateFormat<'a> {
     pub fn new(
-        schemes: Vec<Scheme<'a>>, 
-        routes: Vec<Route<'a>>, 
-        convert_routes_to_tree: for<'b> fn(&'b Vec<Route<'b>>) -> RouteFragment<'b>
+        schemes: Vec<Scheme<'a>>,
+        routes: Vec<Route<'a>>,
+        convert_routes_to_tree: for<'b> fn(&'b Vec<Route<'b>>) -> RouteFragment<'b>,
     ) -> Self {
-        unsafe { 
-            let raw_routes = routes.as_ptr() as *const Vec<Route<'a>>;
+        let routes_tree = RouteFragment::Node(RouteFragmentNodeData {
+            path_fragment_name: "".to_string(),
+            is_param: false,
+            children: vec![],
+        });
+        let mut fake_self = Self {
+            schemes,
+            routes_tree,
+            routes,
+        };
+        unsafe {
+            let raw_routes = fake_self.routes.as_ptr() as *const Vec<Route<'a>>;
             let routes_tree = convert_routes_to_tree(&*raw_routes);
-            Self { schemes, routes_tree, routes }
+            fake_self.routes_tree = routes_tree;
         }
+        fake_self
     }
 }
-
-
 
 pub struct Scheme<'a> {
     pub name: &'a str,
