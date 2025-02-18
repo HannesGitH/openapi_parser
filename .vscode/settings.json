@@ -4,5 +4,6 @@
         "IAST",
         "nullable",
         "reqwest"
-    ]
+    ],
+    "todo-tree.tree.scanMode": "workspace only"
 }

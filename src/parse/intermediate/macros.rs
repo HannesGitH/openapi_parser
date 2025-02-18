@@ -18,6 +18,7 @@ macro_rules! handle_endpoint {
             $endpoints.push(Endpoint {
                 method: $method,
                 description: endpoint.description.as_deref(),
+                summary: endpoint.summary.as_deref(),
                 params: ($parser.params_parser)(&endpoint.parameters).unwrap_or_default(),
                 request: match ($parser.request_parser)(endpoint.request_body.as_ref())
                     {

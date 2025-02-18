@@ -87,7 +87,7 @@ impl<'a> EndpointAdder<'a> {
         let mut imports_str = String::new();
         let mut c = String::new();
         let mut param_typedef_strs = String::new();
-        let mut all_ret_types_str = String::new();
+        // let mut all_ret_types_str = String::new();
         cpf!(c, "import '{}endpoints.dart';", "../".repeat(depth));
         cpf!(c, "/// {}", route.path);
         cpf!(
@@ -189,8 +189,7 @@ impl<'a> EndpointAdder<'a> {
                             _ => (self.scheme_adder.class_name(&response_name), false),
                         }
                     } else {
-                        //TODO
-                        ("TODO".to_string(), false)
+                        ("//TODO: add parser for multiple responses".to_string(), false)
                     }
                 }
             };
@@ -200,7 +199,7 @@ impl<'a> EndpointAdder<'a> {
                     "\n\t\t{}",
                     params_as_json_body_str.replace("\n", "\n\t\t")
                 ));
-                cpf!(s, "\t\treturn handle(method: APIRequestMethod.{}, params: paramsJson, body: {}).then((json) => {});", method_str,match (&body_str, &body_is_primitive) {
+                cpf!(s, "return handle(method: APIRequestMethod.{}, params: paramsJson, body: {}).then((json) => {});", method_str,match (&body_str, &body_is_primitive) {
                     (Some(_), true) => "body",
                     (Some(_), false) => "body.toJson()",
                     (None, _) => "null",
@@ -209,6 +208,8 @@ impl<'a> EndpointAdder<'a> {
             };
 
             param_typedef_strs.push_str(&params_1typedef_str);
+            cpf!(c, "\n\t///{}\n\t///", method.summary.unwrap_or("").replace("\n", "\n\t/// "));
+            cpf!(c, "\t///{}", method.description.unwrap_or("").replace("\n", "\n\t/// "));
             cpf!(
                 c,
                 "  Future<{}> {}({}{}){{{}\t}}",
@@ -224,7 +225,7 @@ impl<'a> EndpointAdder<'a> {
         }
         cpf!(c, "}}\n");
         c.push_str(&param_typedef_strs);
-        c.push_str(&all_ret_types_str);
+        // c.push_str(&all_ret_types_str);
         imports_str.push_str(&c);
         (imports_str, deps)
     }

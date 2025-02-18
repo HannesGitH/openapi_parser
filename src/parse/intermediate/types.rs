@@ -64,6 +64,7 @@ pub struct Route<'a> {
 pub struct Endpoint<'a> {
     pub method: Method,
     pub description: Option<&'a str>,
+    pub summary: Option<&'a str>,
     pub params: Vec<Param<'a>>,
     pub request: Option<IAST<'a>>,
     pub responses: BTreeMap<&'a String, IAST<'a>>,
