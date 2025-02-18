@@ -43,10 +43,8 @@ abstract class APIPath {
 
 //TODO: this is the root API
 class API extends APIHasPath {
-  APIrootFragment get root => APIrootFragment(parent: this);
+  APIrootFrag_ get fragmented => APIrootFrag_(parent: this);
   API();
-
-  APIrootFragment call() => root;
 
   @override
   String get path => '';
