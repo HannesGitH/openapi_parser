@@ -50,19 +50,14 @@ impl<'a> EndpointAdder<'a> {
             }));
         }
 
-
-        let (frag_content, frag_deps) = self.generate_route_fragment(
-            "root",
-            &intermediate.routes_tree,
-            0,
-        );
-        let root_frag_file_name ="root_fragment.dart";
+        let (frag_class_name, frag_content, frag_deps) =
+            self.generate_route_fragment("root", &intermediate.routes_tree, 0);
+        let root_frag_file_name = "root_fragment.dart";
         out_files.push(File {
             path: std::path::PathBuf::from(root_frag_file_name),
             content: frag_content,
         });
         out_files.extend(frag_deps);
-
 
         let mut imports_content = String::new();
         imports_content.push_str(&include_str!("endpoints/imports.dart"));
@@ -234,35 +229,60 @@ impl<'a> EndpointAdder<'a> {
         (imports_str, deps)
     }
 
+    /// returns its own class name, the content to build it and the files it depends on
     fn generate_route_fragment(
         &self,
         name: &str,
         fragment: &intermediate::RouteFragment,
         depth: usize,
-    ) -> (String, Vec<File>) {
+    ) -> (String, String, Vec<File>) {
         let mut s = String::new();
         let mut deps = Vec::new();
         let mut imports_str = String::new();
-        cpf!(imports_str, "import '{}endpoints.dart';", "../".repeat(depth));
+        cpf!(
+            imports_str,
+            "import '{}endpoints.dart';",
+            "../".repeat(depth)
+        );
         use intermediate::RouteFragment;
+        let mut class_name = format!("API{}Frag_{}", name, "unknown");
         match fragment {
             RouteFragment::Node(node) => {
+                class_name = format!("API{}Frag_{}", name, node.path_fragment_name);
                 let sub_dir_name = format!("{}_frags", node.path_fragment_name);
-                cpf!(s, "class API{}Fragment extends APIWithParent {{\n", name);
+                cpf!(s, "class {} extends APIWithParent {{", class_name);
+                cpf!(
+                    s,
+                    "\t{}({{required super.parent}}) : super(ownFragment: '{}');",
+                    class_name,
+                    node.path_fragment_name
+                );
                 for child in &node.children {
                     let child_name = format!("{}_{}", name, node.path_fragment_name);
-                    let (child_str, child_deps) =
+                    let (child_class_name, child_str, child_deps) =
                         self.generate_route_fragment(&child_name, child, depth + 1);
-                    let child_file_name = format!("{}/{}.dart", sub_dir_name, match child {
-                        intermediate::RouteFragment::Node(node) => &node.path_fragment_name,
-                        intermediate::RouteFragment::Leaf(_) => "leaf",
-                    });
+                    let child_file_name = format!(
+                        "{}/{}.dart",
+                        sub_dir_name,
+                        match child {
+                            intermediate::RouteFragment::Node(child_node) => {
+                                &child_node.path_fragment_name
+                            }
+                            intermediate::RouteFragment::Leaf(_) => {
+                                "leaf"
+                            }
+                        }
+                    );
                     let sub_frag_file = File {
                         path: std::path::PathBuf::from(&child_file_name),
                         content: child_str,
                     };
                     deps.extend(child_deps.into_iter().map(|f| File {
-                        path: std::path::PathBuf::from(format!("{}/{}", sub_dir_name, f.path.to_str().unwrap())),
+                        path: std::path::PathBuf::from(format!(
+                            "{}/{}",
+                            sub_dir_name,
+                            f.path.to_str().unwrap()
+                        )),
                         content: f.content,
                     }));
                     deps.push(sub_frag_file);
@@ -275,7 +295,7 @@ impl<'a> EndpointAdder<'a> {
             }
         };
         imports_str.push_str(&s);
-        (imports_str, deps)
+        (class_name, imports_str, deps)
     }
 }
 
