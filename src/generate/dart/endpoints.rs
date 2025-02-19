@@ -102,7 +102,7 @@ impl<'a> EndpointAdder<'a> {
         cpf!(c, "class API{} extends APIPath {{", name);
         cpf!(
             c,
-            "  API{}({{required super.interpolator, required super.handler}})",
+            "  API{}({{required super.interpolatedPath, required super.handler}})",
             name
         );
         cpf!(
@@ -187,9 +187,9 @@ impl<'a> EndpointAdder<'a> {
                         imports_str.push_str(&format!("import '{}';\n", &dep_path_str));
                         match not_built {
                             Some(schemes::NotBuiltData {
-                                reason: _,
+                                reason,
                                 type_name,
-                            }) => (type_name, true),
+                            }) => (type_name, reason == NotBuiltReason::Primitive),
                             _ => (self.scheme_adder.class_name(&response_name), false),
                         }
                     } else {
@@ -260,15 +260,16 @@ impl<'a> EndpointAdder<'a> {
         let mut s = String::new();
         let mut deps = Vec::new();
         let mut imports_str = String::new();
-        cpf!(
-            imports_str,
-            "import '{}endpoints.dart';",
-            "../".repeat(depth)
-        );
+
         use intermediate::RouteFragment;
         let mut class_name = format!("API{}Frag_{}", name, "unknown");
         match fragment {
             RouteFragment::Node(node) => {
+                cpf!(
+                    imports_str,
+                    "import '{}endpoints.dart';",
+                    "../".repeat(depth)
+                );
                 let sanitized_frag_name = node
                     .path_fragment_name
                     .chars()
@@ -280,7 +281,7 @@ impl<'a> EndpointAdder<'a> {
                 cpf!(s, "class {} extends APIWithParent {{", class_name);
                 cpf!(
                     s,
-                    "\t{}({{required super.parent{}}}) : super(ownFragment: {});\n",
+                    "\t{}({{required super.deps, required super.parent{}}}) : super(ownFragment: {});\n",
                     class_name,
                     if node.is_param {
                         ", required String param"
@@ -310,7 +311,7 @@ impl<'a> EndpointAdder<'a> {
                                 if child_node.is_param {
                                     cpf!(
                                         s,
-                                        "\t{} {}(String param) => {}(parent: this, param: param);",
+                                        "\t{} {}(String param) => {}(parent: this, param: param, deps: this.deps);",
                                         child_class_name,
                                         sanitized_child_frag_name,
                                         child_class_name
@@ -318,7 +319,7 @@ impl<'a> EndpointAdder<'a> {
                                 } else {
                                     cpf!(
                                         s,
-                                        "\t{} get {} => {}(parent: this);",
+                                        "\t{} get {} => {}(parent: this, deps: this.deps);",
                                         child_class_name,
                                         sanitized_child_frag_name,
                                         child_class_name
@@ -327,6 +328,12 @@ impl<'a> EndpointAdder<'a> {
                                 child_frag_name
                             }
                             intermediate::RouteFragment::Leaf(_) => {
+                                cpf!(
+                                    s,
+                                    "\t{} call() => {}(interpolatedPath: this.path, handler: this.deps);",
+                                    child_class_name,
+                                    child_class_name
+                                );
                                 "leaf"
                             }
                         }
@@ -350,15 +357,17 @@ impl<'a> EndpointAdder<'a> {
             }
             RouteFragment::Leaf(RouteFragmentLeafData { route_idx }) => {
                 let route = &routes[*route_idx];
+                let sanitized_route_str = route
+                    .path
+                    .chars()
+                    .map(|c| if c.is_alphanumeric() { c } else { '_' })
+                    .collect::<String>();
                 s.push_str(&format!(
                     "export '{}routes/{}.dart';",
                     "../".repeat(depth),
-                    route
-                        .path
-                        .chars()
-                        .map(|c| if c.is_alphanumeric() { c } else { '_' })
-                        .collect::<String>()
+                    sanitized_route_str
                 ));
+                class_name = format!("API{}Methods", sanitized_route_str);
             }
         };
         imports_str.push_str(&s);
