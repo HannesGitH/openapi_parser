@@ -9,17 +9,18 @@ use super::schemes;
 mod macros;
 pub struct EndpointAdder<'a> {
     scheme_adder: &'a schemes::SchemeAdder<'a>,
+    intermediate: &'a intermediate::IntermediateFormat<'a>,
 }
 
 impl<'a> EndpointAdder<'a> {
-    pub fn new(scheme_adder: &'a schemes::SchemeAdder<'a>) -> Self {
-        Self { scheme_adder }
+    pub fn new(scheme_adder: &'a schemes::SchemeAdder<'a>, intermediate: &'a intermediate::IntermediateFormat<'a>) -> Self {
+        Self { scheme_adder, intermediate }
     }
     pub fn add_endpoints(
         &self,
         out: &mut Vec<File>,
-        intermediate: &'a intermediate::IntermediateFormat<'a>,
     ) {
+        let intermediate = self.intermediate;
         let mut out_files: Vec<File> = Vec::new();
         let interface_content = include_str!("endpoints/interface.dart");
         let (path_enum_name, paths_enum_content) = self.scheme_adder.generate_primitive_sum_type(
@@ -189,7 +190,15 @@ impl<'a> EndpointAdder<'a> {
                             Some(schemes::NotBuiltData {
                                 reason,
                                 type_name,
-                            }) => (type_name, reason == NotBuiltReason::Primitive),
+                            }) => (type_name, reason == NotBuiltReason::Primitive || {
+                                // assozialer edge case wo wir gelinkt haben aber auf einen primitive type
+                                // TODO: do this in a better (not just-one-edge-case-fix kinda) way
+                                if let NotBuiltReason::Link(link) = reason {
+                                    self.intermediate.schemes.iter().any(|s| s.name == link)
+                                } else {
+                                    false
+                                }
+                            }),
                             _ => (self.scheme_adder.class_name(&response_name), false),
                         }
                     } else {
