@@ -435,6 +435,7 @@ impl<'a> SchemeAdder<'a> {
             class_name, class_name
         ));
         for prop in properties.iter() {
+            //TODO: parse list if property is a list
             content.push_str(&format!(
                 "    {}: {},\n",
                 prop.name,

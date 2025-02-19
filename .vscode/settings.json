@@ -3,7 +3,8 @@
         "iast",
         "IAST",
         "nullable",
-        "reqwest"
+        "reqwest",
+        "typedef"
     ],
     "todo-tree.tree.scanMode": "workspace only"
 }

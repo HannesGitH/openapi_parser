@@ -55,6 +55,7 @@ impl<'a> EndpointAdder<'a> {
             "root",
             &intermediate.routes_tree,
             &intermediate.routes,
+            true,
             0,
         );
         let root_frag_file_name = "root_fragment.dart";
@@ -194,7 +195,12 @@ impl<'a> EndpointAdder<'a> {
                                 // assozialer edge case wo wir gelinkt haben aber auf einen primitive type
                                 // TODO: do this in a better (not just-one-edge-case-fix kinda) way
                                 if let NotBuiltReason::Link(link) = reason {
-                                    self.intermediate.schemes.iter().any(|s| s.name == link)
+                                    use crate::parse::intermediate::types::*;
+                                    if let Some(Scheme { obj: IAST::Primitive(_), .. }) = self.intermediate.schemes.iter().find(|s| s.name == link) {
+                                        true
+                                    } else {
+                                        false
+                                    }
                                 } else {
                                     false
                                 }
@@ -260,6 +266,7 @@ impl<'a> EndpointAdder<'a> {
         name: &str,
         fragment: &intermediate::RouteFragment,
         routes: &[Route],
+        is_root: bool,
         depth: usize,
     ) -> (String, String, Vec<File>) {
         let name = name
@@ -303,10 +310,13 @@ impl<'a> EndpointAdder<'a> {
                         format!("'{}'", node.path_fragment_name)
                     }
                 );
+                if is_root {
+                    cpf!(s, "  @override\n\tString get path => '';");
+                }
                 for child in &node.children {
                     let child_name = format!("{}_{}", name, node.path_fragment_name);
                     let (child_class_name, child_str, child_deps) =
-                        self.generate_route_fragment(&child_name, child, routes, depth + 1);
+                        self.generate_route_fragment(&child_name, child, routes, false, depth + 1);
                     let child_file_name = format!(
                         "{}/{}.dart",
                         sub_dir_name,
