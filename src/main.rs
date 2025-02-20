@@ -84,7 +84,6 @@ async fn main() {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).unwrap();
         }
-        println!("writing {:}", path.display());
         std::fs::write(path, file.content).unwrap();
     }
 }
