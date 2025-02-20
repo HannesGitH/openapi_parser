@@ -214,7 +214,9 @@ impl<'a> SchemeAdder<'a> {
             ));
             content.push_str(&format!(
                 "  factory {}_.fromJson(dynamic json) => \n\t\t{}_({});\n",
-                v, v, match not_built {
+                v,
+                v,
+                match not_built {
                     Some(NotBuiltData {
                         reason: NotBuiltReason::Primitive,
                         type_name: _,
@@ -300,7 +302,7 @@ impl<'a> SchemeAdder<'a> {
 
         for (p_name, iast) in product.iter() {
             if let intermediate::IAST::Primitive(prim) = &iast {
-                let prim_type = match &prim.value {
+                let (prim_type, prim_data) = match &prim.value {
                     intermediate::types::Primitive::Enum(allowed_values) => {
                         let full_name = format!("{}_{}", name, p_name);
                         let (class_name, content) = self.generate_primitive_sum_type(
@@ -312,7 +314,10 @@ impl<'a> SchemeAdder<'a> {
                                 .collect::<Vec<(_, _)>>(),
                         );
                         extra_content.push_str(&content);
-                        class_name
+                        (
+                            class_name,
+                            PropertyType::Primitive(PrimitivePropertyType::Default),
+                        )
                     }
                     intermediate::types::Primitive::List(inner_iast) => {
                         let full_name = format!("{}_{}", name, p_name);
@@ -325,10 +330,16 @@ impl<'a> SchemeAdder<'a> {
                         for f in depends_on_files.into_iter() {
                             file_sub_dependencies.push(f);
                         }
-                        format!(
-                            "{}<{}>",
-                            to_dart_prim(&prim.value),
-                            self.class_name(&full_name)
+                        let inner_class_name = self.class_name(&full_name);
+                        (
+                            format!("{}<{}>", to_dart_prim(&prim.value), inner_class_name),
+                            PropertyType::Primitive(PrimitivePropertyType::List {
+                                inner_type: inner_class_name,
+                                inner_is_primitive: match **inner_iast {
+                                    intermediate::IAST::Primitive(_) => true,
+                                    _ => false,
+                                },
+                            }),
                         )
                     }
                     intermediate::types::Primitive::Map(inner_iast) => {
@@ -342,20 +353,26 @@ impl<'a> SchemeAdder<'a> {
                         for f in depends_on_files.into_iter() {
                             file_sub_dependencies.push(f);
                         }
-                        format!(
-                            "{}<String,{}>",
-                            to_dart_prim(&prim.value),
-                            self.class_name(&full_name)
+                        (
+                            format!(
+                                "{}<String,{}>",
+                                to_dart_prim(&prim.value),
+                                self.class_name(&full_name)
+                            ),
+                            PropertyType::Primitive(PrimitivePropertyType::Default),
                         )
                     }
-                    _ => to_dart_prim(&prim.value),
+                    _ => (
+                        to_dart_prim(&prim.value),
+                        PropertyType::Primitive(PrimitivePropertyType::Default),
+                    ),
                 };
                 properties.push(Property {
                     name: p_name,
                     typ: prim_type,
                     nullable: prim.nullable,
                     doc_str: mk_doc_str(p_name, &prim, 1),
-                    is_primitive: true,
+                    prop_type: prim_data,
                 });
                 continue;
             }
@@ -366,7 +383,7 @@ impl<'a> SchemeAdder<'a> {
                 typ: self.class_name(&full_name),
                 nullable: false,
                 doc_str: "".to_string(),
-                is_primitive: false,
+                prop_type: PropertyType::Normal,
             });
             file_dependencies.push(File {
                 path: std::path::PathBuf::from(format!("{}/{}.dart", name, p_name)),
@@ -424,7 +441,11 @@ impl<'a> SchemeAdder<'a> {
                 },
                 prop.name,
                 prop.name,
-                if !prop.is_primitive { ".toJson()" } else { "" }
+                if let PropertyType::Normal = prop.prop_type {
+                    ".toJson()"
+                } else {
+                    ""
+                }
             ));
         }
         content.push_str("  };\n");
@@ -435,12 +456,34 @@ impl<'a> SchemeAdder<'a> {
             class_name, class_name
         ));
         for prop in properties.iter() {
-            //TODO: parse list if property is a list
             content.push_str(&format!(
                 "    {}: {},\n",
                 prop.name,
-                if prop.is_primitive {
-                    format!("json['{}']", prop.name)
+                if let PropertyType::Primitive(prim) = &prop.prop_type {
+                    match prim {
+                        PrimitivePropertyType::List {
+                            inner_type,
+                            inner_is_primitive,
+                        } => {
+                            format!(
+                                "{} json['{}'].map((e) => {}).toList()",
+                                if prop.nullable {
+                                    format!("json['{}'] == null ? null : ", prop.name)
+                                } else {
+                                    "".to_string()
+                                },
+                                prop.name,
+                                if *inner_is_primitive {
+                                    "e".to_string()
+                                } else {
+                                    format!("{}.fromJson(e)", inner_type)
+                                },
+                            )
+                        }
+                        PrimitivePropertyType::Default => {
+                            format!("json['{}']", prop.name)
+                        }
+                    }
                 } else {
                     format!(
                         "{}{}.fromJson(json['{}'])",
@@ -505,7 +548,20 @@ struct Property<'a> {
     typ: String,
     nullable: bool,
     doc_str: String,
-    is_primitive: bool,
+    prop_type: PropertyType,
+}
+
+enum PropertyType {
+    Normal,
+    Primitive(PrimitivePropertyType),
+}
+
+enum PrimitivePropertyType {
+    List {
+        inner_type: String,
+        inner_is_primitive: bool,
+    },
+    Default,
 }
 
 pub(super) struct NotBuiltData {
