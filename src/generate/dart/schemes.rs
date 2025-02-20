@@ -476,7 +476,7 @@ impl<'a> SchemeAdder<'a> {
                                 },
                                 prop.name,
                                 if *inner_is_primitive {
-                                    "e".to_string()
+                                    format!("e as {}", inner_type)
                                 } else {
                                     format!("{}.fromJson(e)", inner_type)
                                 },
