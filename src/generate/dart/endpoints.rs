@@ -13,13 +13,16 @@ pub struct EndpointAdder<'a> {
 }
 
 impl<'a> EndpointAdder<'a> {
-    pub fn new(scheme_adder: &'a schemes::SchemeAdder<'a>, intermediate: &'a intermediate::IntermediateFormat<'a>) -> Self {
-        Self { scheme_adder, intermediate }
+    pub fn new(
+        scheme_adder: &'a schemes::SchemeAdder<'a>,
+        intermediate: &'a intermediate::IntermediateFormat<'a>,
+    ) -> Self {
+        Self {
+            scheme_adder,
+            intermediate,
+        }
     }
-    pub fn add_endpoints(
-        &self,
-        out: &mut Vec<File>,
-    ) {
+    pub fn add_endpoints(&self, out: &mut Vec<File>) {
         let intermediate = self.intermediate;
         let mut out_files: Vec<File> = Vec::new();
         let interface_content = include_str!("endpoints/interface.dart");
@@ -94,7 +97,9 @@ impl<'a> EndpointAdder<'a> {
         let mut c = String::new();
         let mut param_typedef_strs = String::new();
         // let mut all_ret_types_str = String::new();
-        cpf!(c, "import '{}endpoints.dart';", "../".repeat(depth));
+        cpf!(imports_str, "// ignore_for_file: unused_import");
+        cpf!(imports_str, "import '{}endpoints.dart';", "../".repeat(depth));
+        cpf!(imports_str, "import '{}utils/serde.dart';", "../".repeat(depth + 1));
         cpf!(c, "/// {}", route.path);
         cpf!(
             c,
@@ -188,23 +193,31 @@ impl<'a> EndpointAdder<'a> {
                         }));
                         imports_str.push_str(&format!("import '{}';\n", &dep_path_str));
                         match not_built {
-                            Some(schemes::NotBuiltData {
-                                reason,
+                            Some(schemes::NotBuiltData { reason, type_name }) => (
                                 type_name,
-                            }) => (type_name, reason == NotBuiltReason::Primitive || {
-                                // assozialer edge case wo wir gelinkt haben aber auf einen primitive type
-                                // TODO: do this in a better (not just-one-edge-case-fix kinda) way
-                                if let NotBuiltReason::Link(link) = reason {
-                                    use crate::parse::intermediate::types::*;
-                                    if let Some(Scheme { obj: IAST::Primitive(_), .. }) = self.intermediate.schemes.iter().find(|s| s.name == link) {
-                                        true
+                                reason == NotBuiltReason::Primitive || {
+                                    // assozialer edge case wo wir gelinkt haben aber auf einen primitive type
+                                    // TODO: do this in a better (not just-one-edge-case-fix kinda) way
+                                    if let NotBuiltReason::Link(link) = reason {
+                                        use crate::parse::intermediate::types::*;
+                                        if let Some(Scheme {
+                                            obj: IAST::Primitive(_),
+                                            ..
+                                        }) = self
+                                            .intermediate
+                                            .schemes
+                                            .iter()
+                                            .find(|s| s.name == link)
+                                        {
+                                            true
+                                        } else {
+                                            false
+                                        }
                                     } else {
                                         false
                                     }
-                                } else {
-                                    false
-                                }
-                            }),
+                                },
+                            ),
                             _ => (self.scheme_adder.class_name(&response_name), false),
                         }
                     } else {
