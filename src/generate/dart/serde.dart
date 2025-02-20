@@ -18,4 +18,11 @@ class UnreachableError extends Error {
   UnreachableError(this.message);
 }
 
-typedef Empty = dynamic;
+class Empty implements APISerde {
+  const Empty();
+
+  @override
+  dynamic toJson() => null;
+
+  factory Empty.fromJson(dynamic json) => Empty();
+}
