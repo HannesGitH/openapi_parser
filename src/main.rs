@@ -26,23 +26,25 @@ impl std::fmt::Display for DestinationLanguage {
 }
 
 async fn fetch_spec_json(url: &str) -> Result<String, reqwest::Error> {
-    // let response = reqwest::get(url).await?;
-    // let body = response.text().await?;
-    // Ok(body)
-    let body = std::fs::read_to_string("openapi.json").unwrap();
+    let response = reqwest::get(url).await?;
+    let body = response.text().await?;
     Ok(body)
+    // let body = std::fs::read_to_string("openapi.json").unwrap();
+    // Ok(body)
 }
 
 #[tokio::main]
 async fn main() {
 
-    //TODO: get spec url from args
+    //XXX: get spec url from args
     let spec_url = "https://api.dev.blingcard.app/openapi?openapiSecret=a1baba99-9ce8-4578-a1a3-704b9cfad928";
 
-    //TODO: get dest out-dir from args
-    let out_dir = std::path::PathBuf::from("out");
+    let out_dir = std::env::args()
+        .nth(2)
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("out"));
 
-    //TODO: get destination language from args
+    //XXX: get destination language from args
     let destination_language = DestinationLanguage::Dart;
 
     println!("getting spec");
