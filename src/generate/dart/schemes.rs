@@ -314,10 +314,7 @@ impl<'a> SchemeAdder<'a> {
                                 .collect::<Vec<(_, _)>>(),
                         );
                         extra_content.push_str(&content);
-                        (
-                            class_name,
-                            PropertyType::Primitive(PrimitivePropertyType::Default),
-                        )
+                        (class_name, PropertyType::Normal)
                     }
                     intermediate::types::Primitive::List(inner_iast) => {
                         let full_name = format!("{}_{}", name, p_name);
