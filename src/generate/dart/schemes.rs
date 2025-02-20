@@ -463,7 +463,7 @@ impl<'a> SchemeAdder<'a> {
                             inner_is_primitive,
                         } => {
                             format!(
-                                "{} json['{}'].map((e) => {}).toList()",
+                                "{} (json['{}'] as List).map((e) => {}).toList()",
                                 if prop.nullable {
                                     format!("json['{}'] == null ? null : ", prop.name)
                                 } else {
