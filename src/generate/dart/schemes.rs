@@ -300,7 +300,12 @@ impl<'a> SchemeAdder<'a> {
 
         let mut extra_content = String::new();
 
-        for (p_name, iast) in product.iter() {
+        let sorted_props = {
+            let mut props = product.iter().collect::<Vec<_>>();
+            props.sort_by_key(|(p_name, _)| p_name.to_string());
+            props
+        };
+        for (p_name, iast) in sorted_props.iter() {
             if let intermediate::IAST::Primitive(prim) = &iast {
                 let (prim_type, prim_data) = match &prim.value {
                     intermediate::types::Primitive::Enum(allowed_values) => {
