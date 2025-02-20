@@ -45,6 +45,8 @@ pub fn parse(spec: &oas3::Spec) -> Result<IntermediateFormat, Error> {
                             responses_parser: Box::new(parse_responses),
                         };
 
+                        println!("route: {:?}", route);
+
                         handle_endpoint!(&parser, &mut endpoints, &route.get, Method::Get);
                         handle_endpoint!(&parser, &mut endpoints, &route.post, Method::Post);
                         handle_endpoint!(&parser, &mut endpoints, &route.put, Method::Put);
