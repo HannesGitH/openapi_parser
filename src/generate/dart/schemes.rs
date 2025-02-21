@@ -10,13 +10,15 @@ static empty_str: String = String::new();
 pub(super) struct SchemeAdder<'a> {
     class_prefix: &'a str,
     class_suffix: &'a str,
+    vars_should_be_final: bool,
 }
 
 impl<'a> SchemeAdder<'a> {
-    pub(super) fn new(class_prefix: &'a str, class_suffix: &'a str) -> Self {
+    pub(super) fn new(class_prefix: &'a str, class_suffix: &'a str, vars_should_be_final: bool) -> Self {
         Self {
             class_prefix,
             class_suffix,
+            vars_should_be_final,
         }
     }
 
@@ -177,8 +179,8 @@ impl<'a> SchemeAdder<'a> {
         }
 
         content.push_str(&format!(
-            "\n{}sealed class {} implements APISerde {{\n\tconst {}();",
-            doc_str, class_name, class_name
+            "\n{}sealed class {} implements APISerde {{\n\t{}{}();",
+            doc_str, class_name, if self.vars_should_be_final { "const " } else { "" }, class_name
         ));
         content.push_str("\n\n\t@Deprecated(\"not deprecated, but usage is highly discouraged, as its not deterministic\")");
         content.push_str(&format!(
@@ -200,8 +202,8 @@ impl<'a> SchemeAdder<'a> {
 
         for (v, not_built) in variants.iter() {
             content.push_str(&format!("class {}_ extends {} {{\n", v, class_name));
-            content.push_str(&format!("  final {} value;\n", v));
-            content.push_str(&format!("  const {}_(this.value);\n", v));
+            content.push_str(&format!("  {}{} value;\n", if self.vars_should_be_final { "final " } else { "" }, v));
+            content.push_str(&format!("  {}{}_(this.value);\n", if self.vars_should_be_final { "const " } else { "" }, v));
             content.push_str(&format!(
                 "\n  @override\n  dynamic toJson() => value{};\n",
                 match not_built {
@@ -412,8 +414,9 @@ impl<'a> SchemeAdder<'a> {
         ));
         for prop in properties.iter() {
             content.push_str(&format!(
-                "\n{}  final {}{} {};\n",
+                "\n{}  {}{}{} {};\n",
                 prop.doc_str,
+                if self.vars_should_be_final { "final " } else { "" },
                 prop.typ,
                 if prop.nullable { "?" } else { "" },
                 prop.name
@@ -421,7 +424,7 @@ impl<'a> SchemeAdder<'a> {
         }
 
         // constructor
-        content.push_str(&format!("\n\n  const {}({{\n", class_name));
+        content.push_str(&format!("\n\n  {}{}({{\n", if self.vars_should_be_final { "const " } else { "" }, class_name));
         for prop in properties.iter() {
             content.push_str(&format!(
                 "    {}this.{},\n",
