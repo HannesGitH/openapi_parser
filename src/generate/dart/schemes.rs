@@ -14,7 +14,11 @@ pub(super) struct SchemeAdder<'a> {
 }
 
 impl<'a> SchemeAdder<'a> {
-    pub(super) fn new(class_prefix: &'a str, class_suffix: &'a str, vars_should_be_final: bool) -> Self {
+    pub(super) fn new(
+        class_prefix: &'a str,
+        class_suffix: &'a str,
+        vars_should_be_final: bool,
+    ) -> Self {
         Self {
             class_prefix,
             class_suffix,
@@ -29,7 +33,8 @@ impl<'a> SchemeAdder<'a> {
     ) {
         let mut scheme_files = Vec::new();
         for scheme in intermediate.schemes.iter() {
-            let (content, depends_on_files, _) = self.parse_named_iast(scheme.name, &scheme.obj, 0);
+            let (content, depends_on_files, _, _nullable) =
+                self.parse_named_iast(scheme.name, &scheme.obj, 0);
             let file = File {
                 path: std::path::PathBuf::from(format!("{}.dart", scheme.name)),
                 content,
@@ -59,12 +64,13 @@ impl<'a> SchemeAdder<'a> {
         format!("{}{}{}", self.class_prefix, name, self.class_suffix)
     }
 
+    // return (content, files, not_built, nullable)
     pub(super) fn parse_named_iast(
         &self,
         name: &str,
         iast: &intermediate::IAST,
         depth: usize,
-    ) -> (String, Vec<File>, Option<NotBuiltData>) {
+    ) -> (String, Vec<File>, Option<NotBuiltData>, bool) {
         match iast {
             intermediate::IAST::Object(annotated_obj) => {
                 let doc_str = mk_doc_str(name, annotated_obj, 0);
@@ -73,12 +79,14 @@ impl<'a> SchemeAdder<'a> {
                 match alg_type {
                     AlgType::Sum(sum) => {
                         let (content, files) = self.generate_sum_type(name, &doc_str, sum, depth);
-                        (content, files, None)
+                        let nullable = annotated_obj.nullable;
+                        (content, files, None, nullable)
                     }
                     AlgType::Product(product) => {
                         let (content, files) =
                             self.generate_product_type(name, &doc_str, product, depth);
-                        (content, files, None)
+                        let nullable = annotated_obj.nullable;
+                        (content, files, None, nullable)
                     }
                 }
             }
@@ -95,13 +103,16 @@ impl<'a> SchemeAdder<'a> {
                         type_name: self.class_name(&trimmed_link),
                         reason: NotBuiltReason::Link(trimmed_link),
                     }),
+                    false,
                 )
             }
             intermediate::IAST::Primitive(annotated_obj) => {
                 let doc_str = mk_doc_str(name, annotated_obj, 0);
                 let mk_type_def = |name: &str, typ: &str| {
-                    let mut ret =
-                        format!("// ignore_for_file: unused_import\nimport '../{}utils/serde.dart';\n\n", "../".repeat(depth));
+                    let mut ret = format!(
+                        "// ignore_for_file: unused_import\nimport '../{}utils/serde.dart';\n\n",
+                        "../".repeat(depth)
+                    );
                     let name = self.class_name(name);
                     ret.push_str(&format!("{}typedef {} = {};\n", doc_str, name, typ));
                     ret
@@ -120,7 +131,7 @@ impl<'a> SchemeAdder<'a> {
                         ret.push_str(&mk_type_def(name, &class_name));
 
                         ret.push_str(&content);
-                        (ret, vec![], None)
+                        (ret, vec![], None, annotated_obj.nullable)
                     }
                     _ => {
                         let typ = to_dart_prim(&annotated_obj.value);
@@ -131,6 +142,7 @@ impl<'a> SchemeAdder<'a> {
                                 reason: NotBuiltReason::Primitive,
                                 type_name: typ,
                             }),
+                            annotated_obj.nullable,
                         )
                     }
                 }
@@ -138,6 +150,7 @@ impl<'a> SchemeAdder<'a> {
         }
     }
 
+    // return (content, files)
     fn generate_sum_type(
         &self,
         name: &str,
@@ -155,13 +168,13 @@ impl<'a> SchemeAdder<'a> {
 
         for (idx, iast) in sum.iter().enumerate() {
             let variant_name = index_to_name(idx);
-            let (content, depends_on_files, not_built) =
+            let (content, depends_on_files, not_built, nullable) =
                 self.parse_named_iast(&variant_name, iast, depth + 1);
             file_dependencies.push(File {
                 path: std::path::PathBuf::from(format!("{}/{}.dart", name, idx)),
                 content,
             });
-            variants.push((self.class_name(&variant_name), not_built));
+            variants.push((self.class_name(&variant_name), not_built, nullable));
             for f in depends_on_files.into_iter() {
                 sub_file_dependencies.push(f);
             }
@@ -180,14 +193,21 @@ impl<'a> SchemeAdder<'a> {
 
         content.push_str(&format!(
             "\n{}sealed class {} implements APISerde {{\n\t{}{}();",
-            doc_str, class_name, if self.vars_should_be_final { "const " } else { "" }, class_name
+            doc_str,
+            class_name,
+            if self.vars_should_be_final {
+                "const "
+            } else {
+                ""
+            },
+            class_name
         ));
         content.push_str("\n\n\t@Deprecated(\"not deprecated, but usage is highly discouraged, as its not deterministic\")");
         content.push_str(&format!(
             "\n\tfactory {}.fromJson(dynamic json) {{",
             class_name
         ));
-        for (v, _) in variants.iter() {
+        for (v, _, variant_nullable) in variants.iter() {
             content.push_str(&format!(
                 "\n\t\ttry{{\n\t\t\treturn {}_.fromJson(json);\n\t\t}} catch(e) {{}}",
                 v
@@ -200,10 +220,26 @@ impl<'a> SchemeAdder<'a> {
 
         content.push_str("\n}\n\n");
 
-        for (v, not_built) in variants.iter() {
+        for (v, not_built, variant_nullable) in variants.iter() {
             content.push_str(&format!("class {}_ extends {} {{\n", v, class_name));
-            content.push_str(&format!("  {}{} value;\n", if self.vars_should_be_final { "final " } else { "" }, v));
-            content.push_str(&format!("  {}{}_(this.value);\n", if self.vars_should_be_final { "const " } else { "" }, v));
+            content.push_str(&format!(
+                "  {}{} value;\n",
+                if self.vars_should_be_final {
+                    "final "
+                } else {
+                    ""
+                },
+                v
+            ));
+            content.push_str(&format!(
+                "  {}{}_(this.value);\n",
+                if self.vars_should_be_final {
+                    "const "
+                } else {
+                    ""
+                },
+                v
+            ));
             content.push_str(&format!(
                 "\n  @override\n  dynamic toJson() => value{};\n",
                 match not_built {
@@ -325,7 +361,7 @@ impl<'a> SchemeAdder<'a> {
                     }
                     intermediate::types::Primitive::List(inner_iast) => {
                         let full_name = format!("{}_{}", name, p_name);
-                        let (content, depends_on_files, _) =
+                        let (content, depends_on_files, _, _nullable) =
                             self.parse_named_iast(&full_name, inner_iast, depth + 1);
                         file_dependencies.push(File {
                             path: std::path::PathBuf::from(format!("{}/{}.dart", name, p_name)),
@@ -348,7 +384,7 @@ impl<'a> SchemeAdder<'a> {
                     }
                     intermediate::types::Primitive::Map(inner_iast) => {
                         let full_name = format!("{}_{}", name, p_name);
-                        let (content, depends_on_files, _) =
+                        let (content, depends_on_files, _, _nullable) =
                             self.parse_named_iast(&full_name, inner_iast, depth + 1);
                         file_dependencies.push(File {
                             path: std::path::PathBuf::from(format!("{}/{}.dart", name, p_name)),
@@ -381,11 +417,12 @@ impl<'a> SchemeAdder<'a> {
                 continue;
             }
             let full_name = format!("{}_{}", name, p_name);
-            let (content, depends_on_files, _) = self.parse_named_iast(&full_name, iast, depth + 1);
+            let (content, depends_on_files, _, nullable) =
+                self.parse_named_iast(&full_name, iast, depth + 1);
             properties.push(Property {
                 name: p_name,
                 typ: self.class_name(&full_name),
-                nullable: false,
+                nullable,
                 doc_str: "".to_string(),
                 prop_type: PropertyType::Normal,
             });
@@ -416,7 +453,11 @@ impl<'a> SchemeAdder<'a> {
             content.push_str(&format!(
                 "\n{}  {}{}{} {};\n",
                 prop.doc_str,
-                if self.vars_should_be_final { "final " } else { "" },
+                if self.vars_should_be_final {
+                    "final "
+                } else {
+                    ""
+                },
                 prop.typ,
                 if prop.nullable { "?" } else { "" },
                 prop.name
@@ -424,7 +465,15 @@ impl<'a> SchemeAdder<'a> {
         }
 
         // constructor
-        content.push_str(&format!("\n\n  {}{}({{\n", if self.vars_should_be_final { "const " } else { "" }, class_name));
+        content.push_str(&format!(
+            "\n\n  {}{}({{\n",
+            if self.vars_should_be_final {
+                "const "
+            } else {
+                ""
+            },
+            class_name
+        ));
         for prop in properties.iter() {
             content.push_str(&format!(
                 "    {}this.{},\n",
@@ -447,9 +496,9 @@ impl<'a> SchemeAdder<'a> {
                 prop.name,
                 prop.name,
                 if let PropertyType::Normal = prop.prop_type {
-                    ".toJson()"
+                    format!("{}.toJson()", if prop.nullable { "!" } else { "" })
                 } else {
-                    ""
+                    "".to_string()
                 }
             ));
         }

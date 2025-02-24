@@ -147,7 +147,7 @@ fn parse_schema(schema: &ObjectOrReference<ObjectSchema>) -> Result<IAST, Error>
 fn parse_object(object: &ObjectSchema) -> Result<IAST, Error> {
     let parse_properties = || {
         Ok(IAST::Object(AnnotatedObj {
-            nullable: false,
+            nullable: object.is_nullable().unwrap_or(false),
             is_deprecated: object.deprecated.unwrap_or(false),
             description: object.description.as_deref(),
             title: object.title.as_deref(),
@@ -218,6 +218,7 @@ fn parse_object(object: &ObjectSchema) -> Result<IAST, Error> {
     if let Some(types) = &object.schema_type {
         let prim_type = match types {
             SchemaTypeSet::Single(typ) => typ,
+            // we currently don't support multiple primitive types
             SchemaTypeSet::Multiple(types) => types
                 .iter()
                 .filter(|typ| typ != &&SchemaType::Null)
