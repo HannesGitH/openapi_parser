@@ -36,16 +36,38 @@ async fn fetch_spec_json(url: &str) -> Result<String, reqwest::Error> {
 #[tokio::main]
 async fn main() {
 
-    //XXX: get spec url from args
-    let spec_url = "https://api.dev.blingcard.app/openapi?openapiSecret=a1baba99-9ce8-4578-a1a3-704b9cfad928";
+    // parse args from the following format
+    // --spec-url/-u <spec-url> --out-dir/-o <out-dir> --destination-language/-d <destination-language> 
+    let mut args = std::env::args().skip(1);
+    let mut spec_url = None;
+    let mut out_dir = None;
+    let mut destination_language = None;
 
-    let out_dir = std::env::args()
-        .nth(2)
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("out"));
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--spec-url" | "-u" => {
+                spec_url = args.next();
+            }
+            "--out-dir" | "-o" => {
+                out_dir = args.next().map(std::path::PathBuf::from);
+            }
+            "--destination-language" | "-d" => {
+                destination_language = args.next().map(|lang| match lang.as_str() {
+                    "dart" => DestinationLanguage::Dart,
+                    _ => panic!("Unsupported destination language")
+                });
+            }
+            _ => panic!("Unknown argument: {}", arg)
+        }
+    }
 
-    //XXX: get destination language from args
-    let destination_language = DestinationLanguage::Dart;
+    let spec_url = spec_url.unwrap_or_else(|| {
+        panic!("Missing required argument: --spec-url/-u")
+    });
+
+    let out_dir = out_dir.unwrap_or_else(|| std::path::PathBuf::from("out"));
+
+    let destination_language = destination_language.unwrap_or(DestinationLanguage::Dart);
 
     println!("getting spec");
     let json = match fetch_spec_json(&spec_url).await {
