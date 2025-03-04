@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::super::interface::*;
 
-use crate::parse::intermediate;
+use crate::{cpf, parse::intermediate};
 
 #[allow(non_upper_case_globals)]
 static empty_str: String = String::new();
@@ -134,14 +134,17 @@ impl<'a> SchemeAdder<'a> {
                         (ret, vec![], None, annotated_obj.nullable)
                     }
                     intermediate::types::Primitive::List(inner_iast) => {
-                        let full_name = format!("{}_", name);
-                        let (content, depends_on_files, _, _nullable) =
-                            self.parse_named_iast(&full_name, inner_iast, depth + 1);
+                        let inner_name = format!("{}_", name);
+                        let (mut content, depends_on_files, _, _nullable) =
+                            self.parse_named_iast(&inner_name, inner_iast, depth + 1);
                         let mut file_dependencies = Vec::new();
 
                         for f in depends_on_files.into_iter() {
                             file_dependencies.push(f);
                         }
+
+                        content.push_str(&mk_type_def(name, &format!("List<{}>", &inner_name)));
+
                         (
                             content,
                             file_dependencies,
