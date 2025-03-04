@@ -143,7 +143,7 @@ impl<'a> SchemeAdder<'a> {
                             file_dependencies.push(f);
                         }
 
-                        content.push_str(&mk_type_def(name, &format!("List<{}>", &inner_name)));
+                        content.push_str(&mk_type_def(name, &format!("List<{}>", self.class_name(&inner_name))));
 
                         (
                             content,
