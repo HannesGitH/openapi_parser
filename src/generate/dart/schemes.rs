@@ -133,6 +133,22 @@ impl<'a> SchemeAdder<'a> {
                         ret.push_str(&content);
                         (ret, vec![], None, annotated_obj.nullable)
                     }
+                    intermediate::types::Primitive::List(inner_iast) => {
+                        let full_name = format!("{}_", name);
+                        let (content, depends_on_files, _, _nullable) =
+                            self.parse_named_iast(&full_name, inner_iast, depth + 1);
+                        let mut file_dependencies = Vec::new();
+
+                        for f in depends_on_files.into_iter() {
+                            file_dependencies.push(f);
+                        }
+                        (
+                            content,
+                            file_dependencies,
+                            None,
+                            annotated_obj.nullable,
+                        )
+                    }
                     _ => {
                         let typ = to_dart_prim(&annotated_obj.value);
                         (
