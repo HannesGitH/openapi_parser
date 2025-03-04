@@ -26,11 +26,20 @@ impl std::fmt::Display for DestinationLanguage {
 }
 
 async fn fetch_spec_json(url: &str) -> Result<String, reqwest::Error> {
-    let response = reqwest::get(url).await?;
+    let username = std::env::var("SWAGGER_BASIC_USER");
+    let password = std::env::var("SWAGGER_BASIC_PASS");
+
+    let client = reqwest::Client::new();
+
+    let response = match username {
+        Ok(username) => client
+            .get(url)
+            .basic_auth(username, password.ok())
+            .send(),
+        Err(_) => client.get(url).send(),
+    }.await?;
     let body = response.text().await?;
     Ok(body)
-    // let body = std::fs::read_to_string("openapi.json").unwrap();
-    // Ok(body)
 }
 
 #[tokio::main]
