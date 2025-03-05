@@ -108,11 +108,14 @@ impl<'a> SchemeAdder<'a> {
             }
             intermediate::IAST::Primitive(annotated_obj) => {
                 let doc_str = mk_doc_str(name, annotated_obj, 0);
-                let mk_type_def = |name: &str, typ: &str| {
-                    let mut ret = format!(
-                        "// ignore_for_file: unused_import\nimport '../{}utils/serde.dart';\n\n",
-                        "../".repeat(depth)
-                    );
+                let mk_type_def = |name: &str, typ: &str, omit_import: bool| {
+                    let mut ret = String::new();
+                    if !omit_import {
+                        ret.push_str(&format!(
+                            "// ignore_for_file: unused_import\nimport '../{}utils/serde.dart';\n\n",
+                            "../".repeat(depth)
+                        ));
+                    }
                     let name = self.class_name(name);
                     ret.push_str(&format!("{}typedef {} = {};\n", doc_str, name, typ));
                     ret
@@ -128,7 +131,7 @@ impl<'a> SchemeAdder<'a> {
                                 .collect::<Vec<(_, _)>>(),
                         );
                         let mut ret = String::new();
-                        ret.push_str(&mk_type_def(name, &class_name));
+                        ret.push_str(&mk_type_def(name, &class_name, false));
 
                         ret.push_str(&content);
                         (ret, vec![], None, annotated_obj.nullable)
@@ -143,7 +146,7 @@ impl<'a> SchemeAdder<'a> {
                             file_dependencies.push(f);
                         }
 
-                        content.push_str(&mk_type_def(name, &format!("List<{}>", self.class_name(&inner_name))));
+                        content.push_str(&mk_type_def(name, &format!("List<{}>", self.class_name(&inner_name)), true));
 
                         (
                             content,
@@ -155,7 +158,7 @@ impl<'a> SchemeAdder<'a> {
                     _ => {
                         let typ = to_dart_prim(&annotated_obj.value);
                         (
-                            mk_type_def(name, &typ),
+                            mk_type_def(name, &typ, false),
                             vec![],
                             Some(NotBuiltData {
                                 reason: NotBuiltReason::Primitive,
