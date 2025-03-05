@@ -128,7 +128,7 @@ impl<'a> EndpointAdder<'a> {
         for method in &route.endpoints {
             let method_str = method.method.string();
             let param_name = format!("_P_{}", method_str);
-            let (body_str, body_is_primitive) = match &method.request {
+            let (body_str, body_is_primitive, body_list_inner_type) = match &method.request {
                 Some(request) => {
                     //do things
                     let request_name = format!("{}{}Request", name, method_str);
@@ -152,16 +152,29 @@ impl<'a> EndpointAdder<'a> {
                     imports_str.push_str(&format!("import '{}';\n", &dep_path_str));
                     let body_type_str = match special_case {
                         Some(schemes::GenerationSpecialCase { reason, type_name }) => {
-                            (type_name, reason == GenerationSpecialCaseType::Primitive)
+                            (
+                                type_name, 
+                                match reason {
+                                    GenerationSpecialCaseType::List(_, is_primitive) => true,
+                                    GenerationSpecialCaseType::Primitive => true,
+                                    //TODO: might also be a primitive link
+                                    GenerationSpecialCaseType::Link(_) => false,
+                                },
+                                match reason {
+                                    GenerationSpecialCaseType::List(inner_type, _) => Some(inner_type),
+                                    _ => None,
+                                },
+                            )
                         }
-                        _ => (self.scheme_adder.class_name(&request_name), false),
+                        _ => (self.scheme_adder.class_name(&request_name), false, None),
                     };
                     (
                         Some(format!(" {{required {} body}}", body_type_str.0)),
                         body_type_str.1,
+                        body_type_str.2,
                     )
                 }
-                None => (None, true),
+                None => (None, true, None),
             };
             let params_str = if method.params.is_empty() {
                 String::new()
