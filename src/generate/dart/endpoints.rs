@@ -274,7 +274,7 @@ impl<'a> EndpointAdder<'a> {
                 }, match (ret_is_primitive, ret_list_inner_type) {
                     (true, None) => "json".to_string(),
                     (true, Some(inner_type)) => format!("json"),
-                    (false, Some(inner_type)) => format!("json.map((e) => {}.fromJson(e)).toList()", inner_type),
+                    (false, Some(inner_type)) => format!("(json as List).map((e) => {}.fromJson(e)).toList()", inner_type),
                     (false, None) => format!("{}.fromJson(json)", ret_type_str),
                 });
                 s
