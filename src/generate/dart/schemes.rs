@@ -139,7 +139,7 @@ impl<'a> SchemeAdder<'a> {
                     intermediate::types::Primitive::List(inner_iast) => {
                         let inner_name = format!("{}_", name);
                         let (mut content, depends_on_files, _, _nullable) =
-                            self.parse_named_iast(&inner_name, inner_iast, depth + 1);
+                            self.parse_named_iast(&inner_name, inner_iast, depth);
                         let mut file_dependencies = Vec::new();
 
                         for f in depends_on_files.into_iter() {
