@@ -1,5 +1,5 @@
 use crate::{
-    generate::{dart::schemes::NotBuiltReason, File},
+    generate::{dart::schemes::GenerationSpecialCaseType, File},
     parse::intermediate::{self, Route, RouteFragmentLeafData},
 };
 
@@ -98,8 +98,16 @@ impl<'a> EndpointAdder<'a> {
         let mut param_typedef_strs = String::new();
         // let mut all_ret_types_str = String::new();
         cpf!(imports_str, "// ignore_for_file: unused_import");
-        cpf!(imports_str, "import '{}endpoints.dart';", "../".repeat(depth));
-        cpf!(imports_str, "import '{}utils/serde.dart';", "../".repeat(depth + 1));
+        cpf!(
+            imports_str,
+            "import '{}endpoints.dart';",
+            "../".repeat(depth)
+        );
+        cpf!(
+            imports_str,
+            "import '{}utils/serde.dart';",
+            "../".repeat(depth + 1)
+        );
         cpf!(c, "/// {}", route.path);
         cpf!(
             c,
@@ -124,9 +132,9 @@ impl<'a> EndpointAdder<'a> {
                 Some(request) => {
                     //do things
                     let request_name = format!("{}{}Request", name, method_str);
-                    let (content, sub_deps, not_built, nullable) =
-                        self.scheme_adder
-                            .parse_named_iast(&request_name, request, depth + 1);
+                    let (content, sub_deps, special_case, nullable) = self
+                        .scheme_adder
+                        .parse_named_iast(&request_name, request, depth + 1);
                     deps.extend(sub_deps.into_iter().map(|f| File {
                         path: std::path::PathBuf::from(format!(
                             "{}/{}",
@@ -142,9 +150,9 @@ impl<'a> EndpointAdder<'a> {
                         content,
                     });
                     imports_str.push_str(&format!("import '{}';\n", &dep_path_str));
-                    let body_type_str = match not_built {
-                        Some(schemes::NotBuiltData { reason, type_name }) => {
-                            (type_name, reason == NotBuiltReason::Primitive)
+                    let body_type_str = match special_case {
+                        Some(schemes::GenerationSpecialCase { reason, type_name }) => {
+                            (type_name, reason == GenerationSpecialCaseType::Primitive)
                         }
                         _ => (self.scheme_adder.class_name(&request_name), false),
                     };
@@ -163,19 +171,17 @@ impl<'a> EndpointAdder<'a> {
             let (params_1typedef_str, params_as_json_body_str) =
                 &mk_params(&method.params, &param_name);
 
-            let (ret_type_str, ret_is_primitive) = {
+            let (ret_type_str, ret_is_primitive, ret_list_inner_type) = {
                 let responses = &method.responses;
                 if responses.is_empty() {
-                    ("()".to_string(), true)
+                    ("()".to_string(), true, None)
                 } else {
                     let response_name = format!("{}_{}Response", name, method_str);
                     if responses.len() == 1 {
                         let (response_code, response) = responses.first_key_value().unwrap();
-                        let (content, sub_deps, not_built, nullable) = self.scheme_adder.parse_named_iast(
-                            &response_name,
-                            &response,
-                            depth + 1,
-                        );
+                        let (content, sub_deps, special_case, nullable) = self
+                            .scheme_adder
+                            .parse_named_iast(&response_name, &response, depth + 1);
                         let dep_path_str =
                             format!("{}/{}.resp.{}.schema.dart", name, method_str, response_code);
                         let dep_path = std::path::PathBuf::from(&dep_path_str);
@@ -192,38 +198,52 @@ impl<'a> EndpointAdder<'a> {
                             content: f.content,
                         }));
                         imports_str.push_str(&format!("import '{}';\n", &dep_path_str));
-                        match not_built {
-                            Some(schemes::NotBuiltData { reason, type_name }) => (
+                        match special_case {
+                            Some(schemes::GenerationSpecialCase { reason, type_name }) => (
                                 type_name,
-                                reason == NotBuiltReason::Primitive || {
-                                    // assozialer edge case wo wir gelinkt haben aber auf einen primitive type
-                                    // TODO: do this in a better (not just-one-edge-case-fix kinda) way
-                                    if let NotBuiltReason::Link(link) = reason {
-                                        use crate::parse::intermediate::types::*;
-                                        if let Some(Scheme {
-                                            obj: IAST::Primitive(_),
-                                            ..
-                                        }) = self
-                                            .intermediate
-                                            .schemes
-                                            .iter()
-                                            .find(|s| s.name == link)
-                                        {
-                                            true
+                                reason == GenerationSpecialCaseType::Primitive
+                                    || {
+                                        // assozialer edge case wo wir gelinkt haben aber auf einen primitive type
+                                        // TODO: do this in a better (not just-one-edge-case-fix kinda) way
+                                        if let GenerationSpecialCaseType::Link(link) = &reason {
+                                            use crate::parse::intermediate::types::*;
+                                            if let Some(Scheme {
+                                                obj: IAST::Primitive(_),
+                                                ..
+                                            }) = self
+                                                .intermediate
+                                                .schemes
+                                                .iter()
+                                                .find(|s| s.name == link)
+                                            {
+                                                true
+                                            } else {
+                                                false
+                                            }
                                         } else {
                                             false
                                         }
+                                    }
+                                    || if let GenerationSpecialCaseType::List(_, is_primitive) =
+                                        &reason
+                                    {
+                                        is_primitive.clone()
                                     } else {
                                         false
-                                    }
+                                    },
+                                if let GenerationSpecialCaseType::List(inner_type, _) = reason {
+                                    Some(inner_type)
+                                } else {
+                                    None
                                 },
                             ),
-                            _ => (self.scheme_adder.class_name(&response_name), false),
+                            None => (self.scheme_adder.class_name(&response_name), false, None),
                         }
                     } else {
                         (
                             "//TODO: add parser for multiple responses".to_string(),
                             false,
+                            None,
                         )
                     }
                 }
@@ -238,7 +258,12 @@ impl<'a> EndpointAdder<'a> {
                     (Some(_), true) => "body",
                     (Some(_), false) => "body.toJson()",
                     (None, _) => "null",
-                }, if ret_is_primitive { "json".to_string() } else { format!("{}.fromJson(json)", ret_type_str) });
+                }, match (ret_is_primitive, ret_list_inner_type) {
+                    (true, None) => "json".to_string(),
+                    (true, Some(inner_type)) => format!("json"),
+                    (false, Some(inner_type)) => format!("json.map((e) => {}.fromJson(e)).toList()", inner_type),
+                    (false, None) => format!("{}.fromJson(json)", ret_type_str),
+                });
                 s
             };
 

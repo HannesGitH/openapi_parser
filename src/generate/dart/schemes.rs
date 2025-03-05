@@ -70,7 +70,7 @@ impl<'a> SchemeAdder<'a> {
         name: &str,
         iast: &intermediate::IAST,
         depth: usize,
-    ) -> (String, Vec<File>, Option<NotBuiltData>, bool) {
+    ) -> (String, Vec<File>, Option<GenerationSpecialCase>, bool) {
         match iast {
             intermediate::IAST::Object(annotated_obj) => {
                 let doc_str = mk_doc_str(name, annotated_obj, 0);
@@ -99,9 +99,9 @@ impl<'a> SchemeAdder<'a> {
                         trimmed_link,
                     ),
                     vec![],
-                    Some(NotBuiltData {
+                    Some(GenerationSpecialCase {
                         type_name: self.class_name(&trimmed_link),
-                        reason: NotBuiltReason::Link(trimmed_link),
+                        reason: GenerationSpecialCaseType::Link(trimmed_link),
                     }),
                     false,
                 )
@@ -138,7 +138,7 @@ impl<'a> SchemeAdder<'a> {
                     }
                     intermediate::types::Primitive::List(inner_iast) => {
                         let inner_name = format!("{}_", name);
-                        let (mut content, depends_on_files, _, _nullable) =
+                        let (mut content, depends_on_files, inner_special_case, _nullable) =
                             self.parse_named_iast(&inner_name, inner_iast, depth);
                         let mut file_dependencies = Vec::new();
 
@@ -146,12 +146,28 @@ impl<'a> SchemeAdder<'a> {
                             file_dependencies.push(f);
                         }
 
-                        content.push_str(&mk_type_def(name, &format!("List<{}>", self.class_name(&inner_name)), true));
+                        content.push_str(&mk_type_def(
+                            name,
+                            &format!("List<{}>", self.class_name(&inner_name)),
+                            true,
+                        ));
 
                         (
                             content,
                             file_dependencies,
-                            None,
+                            Some(GenerationSpecialCase {
+                                reason: GenerationSpecialCaseType::List(
+                                    self.class_name(&inner_name),
+                                    matches!(
+                                        inner_special_case,
+                                        Some(GenerationSpecialCase {
+                                            reason: GenerationSpecialCaseType::Primitive,
+                                            ..
+                                        })
+                                    ),
+                                ),
+                                type_name: self.class_name(name),
+                            }),
                             annotated_obj.nullable,
                         )
                     }
@@ -160,8 +176,8 @@ impl<'a> SchemeAdder<'a> {
                         (
                             mk_type_def(name, &typ, false),
                             vec![],
-                            Some(NotBuiltData {
-                                reason: NotBuiltReason::Primitive,
+                            Some(GenerationSpecialCase {
+                                reason: GenerationSpecialCaseType::Primitive,
                                 type_name: typ,
                             }),
                             annotated_obj.nullable,
@@ -265,8 +281,8 @@ impl<'a> SchemeAdder<'a> {
             content.push_str(&format!(
                 "\n  @override\n  dynamic toJson() => value{};\n",
                 match not_built {
-                    Some(NotBuiltData {
-                        reason: NotBuiltReason::Primitive,
+                    Some(GenerationSpecialCase {
+                        reason: GenerationSpecialCaseType::Primitive,
                         type_name: _,
                     }) => String::new(),
                     _ => format!(".toJson()"),
@@ -277,8 +293,8 @@ impl<'a> SchemeAdder<'a> {
                 v,
                 v,
                 match not_built {
-                    Some(NotBuiltData {
-                        reason: NotBuiltReason::Primitive,
+                    Some(GenerationSpecialCase {
+                        reason: GenerationSpecialCaseType::Primitive,
                         type_name: _,
                     }) => "json".to_string(),
                     _ => format!("{}.fromJson(json)", v),
@@ -640,13 +656,16 @@ enum PrimitivePropertyType {
     Default,
 }
 
-pub(super) struct NotBuiltData {
-    pub reason: NotBuiltReason,
+pub(super) struct GenerationSpecialCase {
+    pub reason: GenerationSpecialCaseType,
     pub type_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum NotBuiltReason {
+pub(super) enum GenerationSpecialCaseType {
     Primitive,
+    //inner type
     Link(String),
+    //inner type, is primitive
+    List(String, bool),
 }
