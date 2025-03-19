@@ -13,7 +13,7 @@
     in {
       packages = forAllSystems (s: with spkgs s; rec {
         parser = rustPlatform.buildRustPackage {
-          pname = "openapi-dart-parser";
+          pname = "openapi_parser";
           version = "0.0.1";
           src = ./.;
           cargoLock = {
