@@ -627,7 +627,7 @@ fn to_dart_prim(primitive: &intermediate::types::Primitive) -> String {
         intermediate::types::Primitive::Number => "num".to_string(),
         intermediate::types::Primitive::Integer => "int".to_string(),
         intermediate::types::Primitive::Boolean => "bool".to_string(),
-        intermediate::types::Primitive::Never => "Empty".to_string(),
+        intermediate::types::Primitive::Never => "UnknownAPIObject".to_string(),
         intermediate::types::Primitive::List(_) => "List".to_string(),
         intermediate::types::Primitive::Map(_) => "Map".to_string(),
         intermediate::types::Primitive::Enum(_) => "Enum".to_string(),

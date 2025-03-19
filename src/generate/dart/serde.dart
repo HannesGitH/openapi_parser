@@ -18,11 +18,14 @@ class UnreachableError extends Error {
   UnreachableError(this.message);
 }
 
-class Empty implements APISerde {
-  const Empty();
+class UnknownAPIObject implements APISerde {
+  const UnknownAPIObject({this.rawValue});
+
+  final dynamic rawValue;
 
   @override
   dynamic toJson() => null;
 
-  factory Empty.fromJson(dynamic json) => Empty();
+  factory UnknownAPIObject.fromJson(dynamic json) =>
+      UnknownAPIObject(rawValue: json);
 }
