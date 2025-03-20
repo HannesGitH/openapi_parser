@@ -5,7 +5,6 @@ use std::thread;
 use crate::parse::intermediate;
 
 mod endpoints;
-mod readme;
 mod schemes;
 mod serde;
 
@@ -14,7 +13,6 @@ impl super::Generator for DartGenerator {
         let class_prefix = "API";
         let class_suffix = "Model";
         let mut out = Vec::new();
-        readme::add_readme(&mut out, spec);
         serde::add_serde_utils(&mut out);
         println!("parsing spec to intermediate");
         let intermediate = match intermediate::parse(&spec) {
