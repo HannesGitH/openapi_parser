@@ -171,6 +171,15 @@ impl<'a> SchemeAdder<'a> {
                             annotated_obj.nullable,
                         )
                     }
+                    intermediate::types::Primitive::Never => {
+                        let typ = to_dart_prim(&annotated_obj.value);
+                        (
+                            mk_type_def(name, &typ, false),
+                            vec![],
+                            None,
+                            annotated_obj.nullable,
+                        )
+                    }
                     _ => {
                         let typ = to_dart_prim(&annotated_obj.value);
                         (
