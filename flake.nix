@@ -19,6 +19,12 @@
           cargoLock = {
             lockFile = ./Cargo.lock;
           };
+          nativeBuildInputs = [
+            pkg-config
+          ];
+          buildInputs = [
+            openssl
+          ];
         };
         default = parser;
       });
