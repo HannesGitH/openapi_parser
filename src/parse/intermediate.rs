@@ -22,7 +22,7 @@ pub fn parse(spec: &oas3::Spec) -> Result<IntermediateFormat, Error> {
     for (name, schema) in components.schemas.iter() {
         schemes.push(Scheme {
             name: name.as_str(),
-            obj: match parse_schema(schema) {
+            obj: match parse_schema(schema, false) {
                 Ok(obj) => obj,
                 Err(e) => return Err(e),
             },
@@ -104,7 +104,7 @@ fn parse_request(request: Option<&ObjectOrReference<RequestBody>>) -> Result<IAS
                 .schema
                 .as_ref()
                 .unwrap();
-            parse_schema(scheme)
+            parse_schema(scheme, false)
         }
         Some(ObjectOrReference::Ref { ref_path, .. }) => Ok(IAST::Reference(ref_path)),
         None => Err(Error::ParseError("No request body".to_string())),
@@ -124,7 +124,7 @@ fn parse_responses<'a>(
                     None => return Err(Error::ParseError("No response body".to_string())),
                 };
                 if let Some(schema) = scheme {
-                    let schema = parse_schema(&schema).unwrap();
+                    let schema = parse_schema(&schema, false).unwrap();
                     map.insert(code, schema);
                 }
             }
@@ -137,17 +137,17 @@ fn parse_responses<'a>(
     Ok(map)
 }
 
-fn parse_schema(schema: &ObjectOrReference<ObjectSchema>) -> Result<IAST, Error> {
+fn parse_schema(schema: &ObjectOrReference<ObjectSchema>, is_nullable: bool) -> Result<IAST, Error> {
     match schema {
-        ObjectOrReference::Object(object) => parse_object(object),
+        ObjectOrReference::Object(object) => parse_object(object, is_nullable),
         ObjectOrReference::Ref { ref_path, .. } => Ok(IAST::Reference(ref_path)),
     }
 }
 
-fn parse_object(object: &ObjectSchema) -> Result<IAST, Error> {
+fn parse_object(object: &ObjectSchema, is_nullable: bool) -> Result<IAST, Error> {
     let parse_properties = || {
         Ok(IAST::Object(AnnotatedObj {
-            nullable: object.is_nullable().unwrap_or(false),
+            nullable: object.is_nullable().unwrap_or(is_nullable),
             is_deprecated: object.deprecated.unwrap_or(false),
             description: object.description.as_deref(),
             title: object.title.as_deref(),
@@ -155,7 +155,7 @@ fn parse_object(object: &ObjectSchema) -> Result<IAST, Error> {
                 match object
                     .properties
                     .iter()
-                    .map(|(name, schema)| match parse_schema(schema) {
+                    .map(|(name, schema)| match parse_schema(schema, !object.required.contains(name)) {
                         Ok(obj) => Ok((name.as_str(), obj)),
                         Err(e) => Err(e),
                     })
@@ -200,7 +200,7 @@ fn parse_object(object: &ObjectSchema) -> Result<IAST, Error> {
                 }
             },
             SchemaType::Array => match &object.items {
-                Some(items) => match parse_schema(&items) {
+                Some(items) => match parse_schema(&items, false) {
                     Ok(obj) => Primitive::List(Box::new(obj)),
                     Err(e) => {
                         println!("error parsing list: {:?}", e);
@@ -259,7 +259,7 @@ fn parse_object(object: &ObjectSchema) -> Result<IAST, Error> {
             value: AlgType::Sum(
                 match union_types
                     .iter()
-                    .map(parse_schema)
+                    .map(|schema| parse_schema(schema, false))
                     .collect::<Result<Vec<_>, _>>()
                 {
                     Ok(types) => types,
