@@ -24,7 +24,7 @@ class UnknownAPIObject implements APISerde {
   final dynamic rawValue;
 
   @override
-  dynamic toJson() => null;
+  dynamic toJson() => {};
 
   factory UnknownAPIObject.fromJson(dynamic json) =>
       UnknownAPIObject(rawValue: json);
