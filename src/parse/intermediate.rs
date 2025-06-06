@@ -73,14 +73,23 @@ fn parse_params(params: &Vec<ObjectOrReference<Parameter>>) -> Result<Vec<Param>
     params
         .iter()
         .map(|param| match param {
-            ObjectOrReference::Object(Parameter { name, location, description, required , ..}) => if location==&ParameterIn::Path {
-                None
-            } else {
-                Some(Ok(Param {
-                    name: name.as_str(),
-                    description: description.as_deref(),
-                    required: required.unwrap_or(false),
-                }))
+            ObjectOrReference::Object(Parameter {
+                name,
+                location,
+                description,
+                required,
+                ..
+            }) => {
+                if location == &ParameterIn::Path {
+                    None
+                } else {
+                    println!("param: {}, required: {}", name, required.unwrap_or(false));
+                    Some(Ok(Param {
+                        name: name.as_str(),
+                        description: description.as_deref(),
+                        required: required.unwrap_or(false),
+                    }))
+                }
             }
             ObjectOrReference::Ref { ref_path, .. } => Some(Err(Error::ParseError(format!(
                 "Reference to {} not supported in params",
@@ -137,7 +146,10 @@ fn parse_responses<'a>(
     Ok(map)
 }
 
-fn parse_schema(schema: &ObjectOrReference<ObjectSchema>, is_nullable: bool) -> Result<IAST, Error> {
+fn parse_schema(
+    schema: &ObjectOrReference<ObjectSchema>,
+    is_nullable: bool,
+) -> Result<IAST, Error> {
     match schema {
         ObjectOrReference::Object(object) => parse_object(object, is_nullable),
         ObjectOrReference::Ref { ref_path, .. } => Ok(IAST::Reference(ref_path)),
@@ -146,8 +158,16 @@ fn parse_schema(schema: &ObjectOrReference<ObjectSchema>, is_nullable: bool) -> 
 
 fn parse_object(object: &ObjectSchema, is_nullable: bool) -> Result<IAST, Error> {
     let parse_properties = || {
+        // if either the parent said its nullable (by not being required) or itself is nullable
+        let is_nullable = is_nullable || object.is_nullable().unwrap_or(false);
+        // println!(
+        //     "parsing properties of object: {}",
+        //     object.title.as_deref().unwrap_or("")
+        // );
+        println!("is_nullable: {}", is_nullable);
+        println!("required: {:?}", object.required);
         Ok(IAST::Object(AnnotatedObj {
-            nullable: object.is_nullable().unwrap_or(is_nullable),
+            nullable: is_nullable,
             is_deprecated: object.deprecated.unwrap_or(false),
             description: object.description.as_deref(),
             title: object.title.as_deref(),
@@ -155,9 +175,13 @@ fn parse_object(object: &ObjectSchema, is_nullable: bool) -> Result<IAST, Error>
                 match object
                     .properties
                     .iter()
-                    .map(|(name, schema)| match parse_schema(schema, !object.required.contains(name)) {
-                        Ok(obj) => Ok((name.as_str(), obj)),
-                        Err(e) => Err(e),
+                    .map(|(name, schema)| {
+                        let is_required = object.required.iter().any(|n|n.as_str() == name.as_str());
+                        // println!("parsing property: {}, nullable: {}", name, !is_required);
+                        match parse_schema(schema, !is_required) {
+                            Ok(obj) => Ok((name.as_str(), obj)),
+                            Err(e) => Err(e),
+                        }
                     })
                     .collect::<Result<HashMap<_, _>, _>>()
                 {
@@ -229,7 +253,7 @@ fn parse_object(object: &ObjectSchema, is_nullable: bool) -> Result<IAST, Error>
         if prim_type != &SchemaType::Object {
             let value = parse_prim_type(prim_type);
             return Ok(IAST::Primitive(AnnotatedObj {
-                nullable: types.contains(SchemaType::Null),
+                nullable: is_nullable || types.contains(SchemaType::Null),
                 is_deprecated: object.deprecated.unwrap_or(false),
                 description: object.description.as_deref(),
                 title: object.title.as_deref(),
@@ -251,8 +275,7 @@ fn parse_object(object: &ObjectSchema, is_nullable: bool) -> Result<IAST, Error>
             &object.one_of
         };
         return Ok(IAST::Object(AnnotatedObj {
-            //TODO: maybe check if null is in the union types
-            nullable: false,
+            nullable: is_nullable,
             is_deprecated: object.deprecated.unwrap_or(false),
             description: object.description.as_deref(),
             title: object.title.as_deref(),
