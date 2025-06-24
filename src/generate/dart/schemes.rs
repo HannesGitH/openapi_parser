@@ -632,11 +632,13 @@ pub fn sanitize(name: &str) -> String {
     let sanitized = name.chars()
         .map(|c| if c.is_alphanumeric() { c } else { '_' })
         .collect::<String>();
-    if sanitized.starts_with('_') {
+    let fixed =if sanitized.starts_with('_') {
         format!("underscored{}", sanitized)
     } else {
         sanitized
-    }
+    };
+    println!("sanitized: {} -> {}", name, fixed);
+    fixed
 }
 
 fn to_dart_prim(primitive: &intermediate::types::Primitive) -> String {
