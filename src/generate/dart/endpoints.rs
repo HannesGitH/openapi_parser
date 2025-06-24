@@ -472,7 +472,7 @@ fn mk_params(params: &[intermediate::Param], name: &str) -> (String, String) {
                 } else {
                     format!("if (params.{} != null) ", p.name)
                 },
-                p.name,
+                p.name.replace("$", "\\$"),
                 p.name,
                 if p.required { "" } else { "!" }
             );
