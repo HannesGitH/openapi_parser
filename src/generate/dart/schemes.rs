@@ -334,9 +334,7 @@ impl<'a> SchemeAdder<'a> {
             .map(|v| {
                 (
                     &v.0,
-                    v.0.chars()
-                        .map(|c| if c.is_alphanumeric() { c } else { '_' })
-                        .collect::<String>(),
+                    remove_special_chars(v.0),
                     &v.1,
                 )
             })
@@ -628,6 +626,12 @@ fn mk_doc_str<T>(name: &str, annotated_obj: &intermediate::AnnotatedObj<T>, tabs
         doc_str.push_str(&format!("{}@deprecated\n", "\t".repeat(tabs)));
     }
     doc_str
+}
+
+pub fn remove_special_chars(name: &str) -> String {
+    name.chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+        .collect::<String>()
 }
 
 fn to_dart_prim(primitive: &intermediate::types::Primitive) -> String {
