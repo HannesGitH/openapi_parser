@@ -331,13 +331,7 @@ impl<'a> SchemeAdder<'a> {
         let class_name = format!("{}{}", self.class_prefix, name);
         let allowed_values_str = allowed_values
             .iter()
-            .map(|v| {
-                (
-                    &v.0,
-                    sanitize(v.0),
-                    &v.1,
-                )
-            })
+            .map(|v| (&v.0, sanitize(v.0), &v.1))
             .collect::<Vec<(_, _, _)>>();
         let mut content = String::new();
         content.push_str(&format!(
@@ -505,7 +499,7 @@ impl<'a> SchemeAdder<'a> {
                 },
                 prop.typ,
                 if prop.nullable { "?" } else { "" },
-                prop.name
+                create_property_name(prop.name)
             ));
         }
 
@@ -523,7 +517,7 @@ impl<'a> SchemeAdder<'a> {
             content.push_str(&format!(
                 "    {}this.{},\n",
                 if !prop.nullable { "required " } else { "" },
-                prop.name
+                create_property_name(prop.name)
             ));
         }
         content.push_str("  });\n");
@@ -534,12 +528,12 @@ impl<'a> SchemeAdder<'a> {
             content.push_str(&format!(
                 "    {}'{}': {}{},\n",
                 if prop.nullable {
-                    format!("if({} != null) ", prop.name)
+                    format!("if({} != null) ", create_property_name(prop.name))
                 } else {
                     "".to_string()
                 },
                 prop.name,
-                prop.name,
+                create_property_name(prop.name),
                 if let PropertyType::Normal = prop.prop_type {
                     format!("{}.toJson()", if prop.nullable { "!" } else { "" })
                 } else {
@@ -557,7 +551,7 @@ impl<'a> SchemeAdder<'a> {
         for prop in properties.iter() {
             content.push_str(&format!(
                 "    {}: {},\n",
-                prop.name,
+                create_property_name(prop.name),
                 if let PropertyType::Primitive(prim) = &prop.prop_type {
                     match prim {
                         PrimitivePropertyType::List {
@@ -629,16 +623,21 @@ fn mk_doc_str<T>(name: &str, annotated_obj: &intermediate::AnnotatedObj<T>, tabs
 }
 
 pub fn sanitize(name: &str) -> String {
-    let sanitized = name.chars()
+    let sanitized = name
+        .chars()
         .map(|c| if c.is_alphanumeric() { c } else { '_' })
         .collect::<String>();
-    let fixed =if sanitized.starts_with('_') {
-        format!("underscored{}", sanitized)
+
+    sanitized
+}
+
+pub fn create_property_name(name: &str) -> String {
+    let sanitized = sanitize(name);
+    if sanitized.starts_with('_') {
+        format!("$private{}", sanitized)
     } else {
         sanitized
-    };
-    println!("sanitized: {} -> {}", name, fixed);
-    fixed
+    }
 }
 
 fn to_dart_prim(primitive: &intermediate::types::Primitive) -> String {
