@@ -1,5 +1,5 @@
 use crate::{
-    generate::{dart::schemes::{remove_special_chars, GenerationSpecialCaseType}, File},
+    generate::{dart::schemes::{sanitize, GenerationSpecialCaseType}, File},
     parse::intermediate::{self, Route, RouteFragmentLeafData},
 };
 
@@ -37,7 +37,7 @@ impl<'a> EndpointAdder<'a> {
         );
 
         for route in &intermediate.routes {
-            let sanitized_path = remove_special_chars(route.path);
+            let sanitized_path = sanitize(route.path);
             let name = format!("{}Methods", sanitized_path);
             let (content, files) = self.generate_path_method_wrapper(&name, route, 1);
             out_files.push(File {
@@ -316,7 +316,7 @@ impl<'a> EndpointAdder<'a> {
         is_root: bool,
         depth: usize,
     ) -> (String, String, Vec<File>) {
-        let name = remove_special_chars(name);
+        let name = sanitize(name);
         let mut s = String::new();
         let mut deps = Vec::new();
         let mut imports_str = String::new();
@@ -330,7 +330,7 @@ impl<'a> EndpointAdder<'a> {
                     "import '{}endpoints.dart';",
                     "../".repeat(depth)
                 );
-                let sanitized_frag_name = remove_special_chars(node.path_fragment_name.as_str());
+                let sanitized_frag_name = sanitize(node.path_fragment_name.as_str());
                 class_name = format!("API{}Frag_{}", name, sanitized_frag_name);
 
                 let sub_dir_name = format!("{}_frags", node.path_fragment_name);
@@ -363,7 +363,7 @@ impl<'a> EndpointAdder<'a> {
                         match child {
                             intermediate::RouteFragment::Node(child_node) => {
                                 let child_frag_name = &child_node.path_fragment_name;
-                                let sanitized_child_frag_name = remove_special_chars(child_frag_name);
+                                let sanitized_child_frag_name = sanitize(child_frag_name);
                                 if child_node.is_param {
                                     cpf!(
                                         s,
@@ -413,7 +413,7 @@ impl<'a> EndpointAdder<'a> {
             }
             RouteFragment::Leaf(RouteFragmentLeafData { route_idx }) => {
                 let route = &routes[*route_idx];
-                let sanitized_route_str = remove_special_chars(route.path);
+                let sanitized_route_str = sanitize(route.path);
                 s.push_str(&format!(
                     "export '{}routes/{}.dart';",
                     "../".repeat(depth),
