@@ -22,13 +22,14 @@ impl super::Generator for DartGenerator {
                 return Err(format!("parsing spec to intermediate error: {:?}", e));
             }
         };
-        let scheme_adder = schemes::SchemeAdder::new(class_prefix, class_suffix, false);
+        let mut scheme_adder = schemes::SchemeAdder::new(class_prefix, class_suffix, false);
+        scheme_adder.set_complete_iast(&intermediate);
         let endpoint_adder = endpoints::EndpointAdder::new(&scheme_adder, &intermediate);
         let mut scheme_files = Vec::new();
         let mut endpoint_files = Vec::new();
         thread::scope(|s| {
             s.spawn(|| {
-                scheme_adder.add_schemes(&mut scheme_files, &intermediate);
+                scheme_adder.add_schemes(&mut scheme_files);
             });
             s.spawn(|| {
                 endpoint_adder.add_endpoints(&mut endpoint_files);

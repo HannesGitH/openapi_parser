@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use super::super::interface::*;
 
+#[allow(unused_imports)]
 use crate::{cpf, parse::intermediate};
 
 #[allow(non_upper_case_globals)]
@@ -11,6 +12,7 @@ pub(super) struct SchemeAdder<'a> {
     class_prefix: &'a str,
     class_suffix: &'a str,
     vars_should_be_final: bool,
+    complete_iast: Option<&'a intermediate::IntermediateFormat<'a>>,
 }
 
 impl<'a> SchemeAdder<'a> {
@@ -23,16 +25,20 @@ impl<'a> SchemeAdder<'a> {
             class_prefix,
             class_suffix,
             vars_should_be_final,
+            complete_iast: None,
         }
     }
 
+    pub(super) fn set_complete_iast(&mut self, intermediate: &'a intermediate::IntermediateFormat<'a>) {
+        self.complete_iast = Some(intermediate);
+    }
+
     pub(super) fn add_schemes(
-        &self,
+        & self,
         out: &mut Vec<File>,
-        intermediate: &intermediate::IntermediateFormat<'a>,
     ) {
         let mut scheme_files = Vec::new();
-        for scheme in intermediate.schemes.iter() {
+        for scheme in self.complete_iast.unwrap().schemes.iter() {
             let (content, depends_on_files, _, _nullable) =
                 self.parse_named_iast(scheme.name, &scheme.obj, 0);
             let file = File {
@@ -92,6 +98,8 @@ impl<'a> SchemeAdder<'a> {
             }
             intermediate::IAST::Reference(link) => {
                 let trimmed_link = link.replace("#/components/schemas/", "");
+                //TODO: get name from the link
+                let name = &trimmed_link;//self.complete_iast.unwrap().schemes.iter().find(|s| s.name == trimmed_link).unwrap().name;
                 (
                     format!(
                         "export '{}schemes/{}.dart';",
@@ -100,7 +108,8 @@ impl<'a> SchemeAdder<'a> {
                     ),
                     vec![],
                     Some(GenerationSpecialCase {
-                        type_name: self.class_name(&trimmed_link),
+                        //TODO: get name from the link
+                        type_name: self.class_name(&name),
                         reason: GenerationSpecialCaseType::Link(trimmed_link),
                     }),
                     false,
