@@ -83,7 +83,7 @@ fn parse_params(params: &Vec<ObjectOrReference<Parameter>>) -> Result<Vec<Param>
                 if location == &ParameterIn::Path {
                     None
                 } else {
-                    println!("param: {}, required: {}", name, required.unwrap_or(false));
+                    // println!("param: {}, required: {}", name, required.unwrap_or(false));
                     Some(Ok(Param {
                         name: name.as_str(),
                         description: description.as_deref(),
@@ -160,12 +160,6 @@ fn parse_object(object: &ObjectSchema, is_nullable: bool) -> Result<IAST, Error>
     let parse_properties = || {
         // if either the parent said its nullable (by not being required) or itself is nullable
         let is_nullable = is_nullable || object.is_nullable().unwrap_or(false);
-        // println!(
-        //     "parsing properties of object: {}",
-        //     object.title.as_deref().unwrap_or("")
-        // );
-        println!("is_nullable: {}", is_nullable);
-        println!("required: {:?}", object.required);
         Ok(IAST::Object(AnnotatedObj {
             nullable: is_nullable,
             is_deprecated: object.deprecated.unwrap_or(false),

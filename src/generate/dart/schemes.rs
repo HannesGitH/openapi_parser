@@ -98,8 +98,6 @@ impl<'a> SchemeAdder<'a> {
             }
             intermediate::IAST::Reference(link) => {
                 let trimmed_link = link.replace("#/components/schemas/", "");
-                //TODO: get name from the link
-                let name = &trimmed_link;//self.complete_iast.unwrap().schemes.iter().find(|s| s.name == trimmed_link).unwrap().name;
                 (
                     format!(
                         "export '{}schemes/{}.dart';",
@@ -108,8 +106,7 @@ impl<'a> SchemeAdder<'a> {
                     ),
                     vec![],
                     Some(GenerationSpecialCase {
-                        //TODO: get name from the link
-                        type_name: self.class_name(&name),
+                        type_name: self.class_name(&trimmed_link),
                         reason: GenerationSpecialCaseType::Link(trimmed_link),
                     }),
                     false,
@@ -465,11 +462,19 @@ impl<'a> SchemeAdder<'a> {
                 continue;
             }
             let full_name = format!("{}_{}", name, p_name);
-            let (content, depends_on_files, _, nullable) =
+            let mut type_name = self.class_name(&full_name);
+            let (content, depends_on_files, special_case, nullable) =
                 self.parse_named_iast(&full_name, iast, depth + 1);
+            if let Some(GenerationSpecialCase {
+                reason: GenerationSpecialCaseType::Link(link),
+                type_name: internal_type_name,
+            }) = special_case
+            {
+                type_name = internal_type_name;
+            }
             properties.push(Property {
                 name: p_name,
-                typ: self.class_name(&full_name),
+                typ: type_name,
                 nullable,
                 doc_str: "".to_string(),
                 prop_type: PropertyType::Normal,
