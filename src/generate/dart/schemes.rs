@@ -274,6 +274,13 @@ impl<'a> SchemeAdder<'a> {
         content.push_str("\n}\n\n");
 
         for (v, not_built, variant_nullable) in variants.iter() {
+            let value_type_name = match not_built {
+                Some(GenerationSpecialCase {
+                    type_name: internal_type_name,
+                    ..
+                }) => internal_type_name,
+                _ => v,
+            };
             content.push_str(&format!("class {}_ extends {} {{\n", v, class_name));
             content.push_str(&format!(
                 "  {}{} value;\n",
@@ -282,7 +289,7 @@ impl<'a> SchemeAdder<'a> {
                 } else {
                     ""
                 },
-                v
+                value_type_name
             ));
             content.push_str(&format!(
                 "  {}{}_(this.value);\n",
@@ -291,7 +298,7 @@ impl<'a> SchemeAdder<'a> {
                 } else {
                     ""
                 },
-                v
+                value_type_name
             ));
             content.push_str(&format!(
                 "\n  @override\n  dynamic toJson() => value{};\n",
@@ -305,8 +312,8 @@ impl<'a> SchemeAdder<'a> {
             ));
             content.push_str(&format!(
                 "  factory {}_.fromJson(dynamic json) => \n\t\t{}_({});\n",
-                v,
-                v,
+                value_type_name,
+                value_type_name,
                 match not_built {
                     Some(GenerationSpecialCase {
                         reason: GenerationSpecialCaseType::Primitive,

@@ -11,7 +11,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 [profile.release]
 strip = true  # Automatically strip symbols from the binary.
-lto = true
-opt-level = "z"
-codegen-units = 1 #run single-thread st everything knows about everything
-# panic = "abort"
+# lto = true
+# opt-level = "z"
+# codegen-units = 1 #run single-thread st everything knows about everything
+# # panic = "abort"
