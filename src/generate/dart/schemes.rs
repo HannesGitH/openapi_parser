@@ -143,13 +143,22 @@ impl<'a> SchemeAdder<'a> {
                         (ret, vec![], None, annotated_obj.nullable)
                     }
                     intermediate::types::Primitive::List(inner_iast) => {
-                        let inner_name = format!("{}_", name);
+                        let mut inner_name = &format!("{}_", name);
                         let (mut content, depends_on_files, inner_special_case, _nullable) =
                             self.parse_named_iast(&inner_name, inner_iast, depth);
                         let mut file_dependencies = Vec::new();
 
                         for f in depends_on_files.into_iter() {
                             file_dependencies.push(f);
+                        }
+
+                        if let Some(GenerationSpecialCase {
+                            type_name: _,
+                            reason: GenerationSpecialCaseType::Link(internal_type_name),
+                        }) = &inner_special_case
+                        {
+                            println!("list of link: {}", internal_type_name);
+                            inner_name = internal_type_name;
                         }
 
                         content.push_str(&mk_type_def(
@@ -431,9 +440,19 @@ impl<'a> SchemeAdder<'a> {
                         (class_name, PropertyType::Normal)
                     }
                     intermediate::types::Primitive::List(inner_iast) => {
-                        let full_name = format!("{}_{}", name, p_name);
-                        let (content, depends_on_files, _, _nullable) =
+                        let mut full_name = &format!("{}_{}", name, p_name);
+                        let (content, depends_on_files, inner_special_case, _nullable) =
                             self.parse_named_iast(&full_name, inner_iast, depth + 1);
+
+                        if let Some(GenerationSpecialCase {
+                            type_name: _,
+                            reason: GenerationSpecialCaseType::Link(internal_type_name),
+                        }) = &inner_special_case
+                        {
+                            println!("list of link (product){} {}", internal_type_name, full_name);
+                            full_name = internal_type_name;
+                        }
+
                         file_dependencies.push(File {
                             path: std::path::PathBuf::from(format!("{}/{}.dart", name, p_name)),
                             content,
@@ -492,10 +511,11 @@ impl<'a> SchemeAdder<'a> {
             let (content, depends_on_files, special_case, nullable) =
                 self.parse_named_iast(&full_name, iast, depth + 1);
             if let Some(GenerationSpecialCase {
-                reason: GenerationSpecialCaseType::Link(link),
-                type_name: internal_type_name,
+                reason: GenerationSpecialCaseType::Link(internal_type_name),
+                type_name: _,
             }) = special_case
             {
+                println!("link: {} {}", internal_type_name, type_name);
                 type_name = internal_type_name;
             }
             properties.push(Property {
@@ -715,6 +735,7 @@ enum PrimitivePropertyType {
     Default,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct GenerationSpecialCase {
     pub reason: GenerationSpecialCaseType,
     pub type_name: String,
