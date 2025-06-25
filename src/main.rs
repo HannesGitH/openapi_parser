@@ -106,9 +106,10 @@ async fn main() {
         println!("no files to write");
         return;
     }
-    println!("writing files");
+    print!("writing files");
     // start from scratch, i.e. rm -rf out_dir
     let _ = std::fs::remove_dir_all(&out_dir);
+    print!(":");
     for file in files {
         let path = out_dir.join(&file.path);
         // Create parent directories if they don't exist
@@ -116,5 +117,11 @@ async fn main() {
             std::fs::create_dir_all(parent).unwrap();
         }
         std::fs::write(path, file.content).unwrap();
+        print!(".");
     }
+    println!("");
+    println!("done");
+
+    // exit with 0
+    std::process::exit(0);
 }

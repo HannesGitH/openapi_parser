@@ -276,11 +276,14 @@ impl<'a> SchemeAdder<'a> {
         for (v, not_built, variant_nullable) in variants.iter() {
             let value_type_name = match not_built {
                 Some(GenerationSpecialCase {
-                    type_name: internal_type_name,
-                    ..
-                }) => internal_type_name,
+                    type_name: _,
+                    reason: GenerationSpecialCaseType::Link(internal_type_name),
+                }) => {
+                    &self.class_name(internal_type_name)
+                },
                 _ => v,
             };
+
             content.push_str(&format!("class {}_ extends {} {{\n", v, class_name));
             content.push_str(&format!(
                 "  {}{} value;\n",
@@ -298,28 +301,44 @@ impl<'a> SchemeAdder<'a> {
                 } else {
                     ""
                 },
-                value_type_name
+                v
             ));
             content.push_str(&format!(
-                "\n  @override\n  dynamic toJson() => value{};\n",
+                "\n  @override\n  dynamic toJson() => {};\n",
                 match not_built {
                     Some(GenerationSpecialCase {
                         reason: GenerationSpecialCaseType::Primitive,
                         type_name: _,
-                    }) => String::new(),
-                    _ => format!(".toJson()"),
+                    }) => "value".to_string(),
+                    Some(GenerationSpecialCase {
+                        reason: GenerationSpecialCaseType::List(inner_type, is_primitive),
+                        type_name: _,
+                    }) => if *is_primitive {
+                        format!("value.map((e) => e as {}).toList()", inner_type)
+                    } else {
+                        format!("value.map((e) => e.toJson()).toList()")
+                    },
+                    _ => "value.toJson()".to_string(),
                 }
             ));
             content.push_str(&format!(
                 "  factory {}_.fromJson(dynamic json) => \n\t\t{}_({});\n",
-                value_type_name,
-                value_type_name,
+                v,
+                v,
                 match not_built {
                     Some(GenerationSpecialCase {
                         reason: GenerationSpecialCaseType::Primitive,
                         type_name: _,
                     }) => "json".to_string(),
-                    _ => format!("{}.fromJson(json)", v),
+                    Some(GenerationSpecialCase {
+                        reason: GenerationSpecialCaseType::List(inner_type, is_primitive),
+                        type_name: _,
+                    }) => if *is_primitive {
+                        format!("(json as List).map((e) => e as {}).toList()", inner_type)
+                    } else {
+                        format!("(json as List).map((e) => {}.fromJson(e)).toList()", inner_type)
+                    },
+                    _ => format!("{}.fromJson(json)", value_type_name),
                 }
             ));
             content.push_str("}\n\n");
