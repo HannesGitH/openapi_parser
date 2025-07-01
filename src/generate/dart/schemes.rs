@@ -516,7 +516,7 @@ impl<'a> SchemeAdder<'a> {
             }) = special_case
             {
                 println!("link: {} {}", internal_type_name, type_name);
-                type_name = internal_type_name;
+                type_name = self.class_name(internal_type_name.as_str());
             }
             properties.push(Property {
                 name: p_name,
