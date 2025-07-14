@@ -31,6 +31,7 @@
 
       devShells = forAllSystems (s: with spkgs s; {
         default = mkShell {
+          RUST_SRC_PATH = "${rustPlatform.rustLibSrc}";
           buildInputs = [
             cargo
             rustc

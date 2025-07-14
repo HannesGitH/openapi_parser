@@ -121,6 +121,7 @@ pub enum Primitive<'a> {
     Never,
     List(Box<IAST<'a>>),
     Map(Box<IAST<'a>>),
-    Enum(Vec<String>),
+    // each (value, is_string), is_string
+    Enum(Vec<(String, bool)>),
     Dynamic,
 }

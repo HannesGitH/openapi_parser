@@ -133,8 +133,8 @@ impl<'a> SchemeAdder<'a> {
                             &doc_str,
                             &allowed_values
                                 .iter()
-                                .map(|v| (v.as_str(), empty_str.as_str()))
-                                .collect::<Vec<(_, _)>>(),
+                                .map(|v| (v.0.as_str(), v.1, empty_str.as_str()))
+                                .collect::<Vec<(_, _, _)>>(),
                         );
                         let mut ret = String::new();
                         ret.push_str(&mk_type_def(name, &class_name, false));
@@ -366,34 +366,43 @@ impl<'a> SchemeAdder<'a> {
         &self,
         name: &str,
         doc_str: &str,
-        // (allowed_value, description)
-        allowed_values: &Vec<(&str, &str)>,
+        // (allowed_value, is_string, description)
+        allowed_values: &Vec<(&str, bool, &str)>,
     ) -> (String, String) {
         let class_name = format!("{}{}", self.class_prefix, name);
+        // (sanitized_value, enum_value, is_string, description)
         let allowed_values_str = allowed_values
             .iter()
-            .map(|v| (&v.0, sanitize(v.0), &v.1))
-            .collect::<Vec<(_, _, _)>>();
+            .map(|v| (&v.0, sanitize(v.0), v.1, &v.2))
+            .collect::<Vec<(_, _, _, _)>>();
         let mut content = String::new();
         content.push_str(&format!(
             "\n{}enum {} implements APISerde {{\n",
             doc_str, class_name
         ));
-        for (orig_value, enum_value, desc) in allowed_values_str.iter() {
+        for (orig_value, enum_value, _, desc) in allowed_values_str.iter() {
             content.push_str(&format!("\n  /// {}\n", orig_value));
             content.push_str(&format!("  ///{}\n", desc.replace("\n", "\n  ///")));
             content.push_str(&format!("  t_{},\n", enum_value));
         }
         content.push_str(&"\t;\n\n\t@override\n\tdynamic toJson() => switch(this) {\n");
-        for (orig_value, enum_value, _) in allowed_values_str.iter() {
-            content.push_str(&format!("\t\tt_{} => '{}',\n", enum_value, orig_value));
+        for (orig_value, enum_value, is_string, _) in allowed_values_str.iter() {
+            content.push_str(&format!("\t\tt_{} => {},\n", enum_value, if *is_string {
+                format!("'{}'", orig_value)
+            } else {
+                orig_value.to_string()
+            }));
         }
         content.push_str(&format!(
             "\t}};\n\tfactory {}.fromJson(dynamic json) => switch(json) {{\n",
             class_name
         ));
-        for (orig_value, enum_value, _) in allowed_values_str.iter() {
-            content.push_str(&format!("\t\t'{}' => t_{},\n", orig_value, enum_value));
+        for (orig_value, enum_value, is_string, _) in allowed_values_str.iter() {
+            content.push_str(&format!("\t\t{} => t_{},\n", if *is_string {
+                format!("'{}'", orig_value)
+            } else {
+                orig_value.to_string()
+            }, enum_value));
         }
         content.push_str(&format!(
             "\t\t_ => throw UnreachableError('{}'),\n",
@@ -433,8 +442,8 @@ impl<'a> SchemeAdder<'a> {
                             doc_str,
                             &allowed_values
                                 .iter()
-                                .map(|v| (v.as_str(), empty_str.as_str()))
-                                .collect::<Vec<(_, _)>>(),
+                                .map(|v| (v.0.as_str(), v.1, empty_str.as_str()))
+                                .collect::<Vec<(_, _, _)>>(),
                         );
                         extra_content.push_str(&content);
                         (class_name, PropertyType::Normal)

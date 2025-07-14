@@ -32,8 +32,9 @@ impl<'a> EndpointAdder<'a> {
             &intermediate
                 .routes
                 .iter()
-                .map(|r| (r.path, r.description.unwrap_or("")))
-                .collect::<Vec<(&str, &str)>>(),
+                // we always have a string path, so we can always use true here (i guess)
+                .map(|r| (r.path, true, r.description.unwrap_or("")))
+                .collect::<Vec<(&str, bool, &str)>>(),
         );
 
         for route in &intermediate.routes {
