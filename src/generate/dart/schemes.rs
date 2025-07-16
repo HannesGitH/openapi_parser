@@ -100,7 +100,9 @@ impl<'a> SchemeAdder<'a> {
                 let trimmed_link = link.replace("#/components/schemas/", "");
                 (
                     format!(
-                        "export '{}schemes/{}.dart';",
+                        "export '{}schemes/{}.dart';\nimport '{}schemes/{}.dart';\n",
+                        "../".repeat(depth + 1),
+                        trimmed_link,
                         "../".repeat(depth + 1),
                         trimmed_link,
                     ),
