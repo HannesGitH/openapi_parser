@@ -172,6 +172,8 @@ fn parse_object(object: &ObjectSchema, is_nullable: bool) -> Result<IAST, Error>
                     .map(|(name, schema)| {
                         let is_required = object.required.iter().any(|n|n.as_str() == name.as_str());
                         // println!("parsing property: {}, nullable: {}", name, !is_required);
+
+                        //TODO: there was a case where a required object could either be an object or null, but the oas3 spec properties where empty although the json had some, idk
                         match parse_schema(schema, !is_required) {
                             Ok(obj) => Ok((name.as_str(), obj)),
                             Err(e) => Err(e),
@@ -291,6 +293,8 @@ fn parse_object(object: &ObjectSchema, is_nullable: bool) -> Result<IAST, Error>
     if !object.properties.is_empty() {
         return parse_properties();
     }
+
+    println!("got to an empty object");
 
     //TODO: hmm
     Ok(IAST::Primitive(AnnotatedObj {
