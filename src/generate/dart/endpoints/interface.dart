@@ -1,69 +1,69 @@
 abstract interface class JsonRequestHandler {
   Future<dynamic> handle({
-    required APIRequestMethod method,
+    required BEAMRequestMethod method,
     required String path,
     Map<String, String> params = const {},
     dynamic body,
   });
 }
 
-typedef APIRequestLeafDeps = JsonRequestHandler;
+typedef BEAMRequestLeafDeps = JsonRequestHandler;
 
-enum APIRequestMethod {
-  get,
-  post,
-  put,
-  delete,
-  patch,
-  options,
-  head,
-}
+enum BEAMRequestMethod { get, post, put, delete, patch, options, head }
 
-extension APIPathName on APIPathEnum {
+extension BEAMPathName on BEAMPathEnum {
   String get path => this.toJson();
 }
 
-abstract class APIPath {
-  final APIPathEnum path;
+abstract class BEAMPath {
+  final BEAMPathEnum path;
   final String interpolatedPath;
   final JsonRequestHandler handler;
-  APIPath(
-      {required this.path,
-      required this.interpolatedPath,
-      required this.handler});
+  BEAMPath({
+    required this.path,
+    required this.interpolatedPath,
+    required this.handler,
+  });
 
   Future<dynamic> handle({
-    required APIRequestMethod method,
+    required BEAMRequestMethod method,
     Map<String, String> params = const {},
     dynamic body = const {},
   }) {
     return handler.handle(
-        method: method, path: interpolatedPath, params: params, body: body);
+      method: method,
+      path: interpolatedPath,
+      params: params,
+      body: body,
+    );
   }
 }
 
-//TODO: this is the root API
-class API extends APIHasPath {
-  final APIRequestLeafDeps deps;
-  API({required JsonRequestHandler handler}) : deps = handler;
+//TODO: this is the root BEAM
+class BEAM extends BEAMHasPath {
+  final BEAMRequestLeafDeps deps;
+  BEAM({required JsonRequestHandler handler}) : deps = handler;
 
-  APIrootFrag_ get fragmented => APIrootFrag_(deps: this.deps, parent: this);
+  BEAMrootFrag_ get fragmented => BEAMrootFrag_(deps: this.deps, parent: this);
 
   @override
   String get path => '';
 }
 
-abstract interface class APIHasPath {
+abstract interface class BEAMHasPath {
   String get path;
 }
 
-abstract class APIWithParent implements APIHasPath {
-  final APIHasPath parent;
+abstract class BEAMWithParent implements BEAMHasPath {
+  final BEAMHasPath parent;
   final String ownFragment;
-  final APIRequestLeafDeps deps;
+  final BEAMRequestLeafDeps deps;
 
-  APIWithParent(
-      {required this.parent, required this.ownFragment, required this.deps});
+  BEAMWithParent({
+    required this.parent,
+    required this.ownFragment,
+    required this.deps,
+  });
 
   @override
   String get path => "${parent.path}/$ownFragment";

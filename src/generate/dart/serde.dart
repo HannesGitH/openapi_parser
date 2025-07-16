@@ -1,13 +1,13 @@
 // in dart we cannot enforce our classes to have a fromJson method
 import 'dart:convert';
 
-abstract interface class APISerde {
+abstract interface class BEAMSerde {
   /// either a Map<String, dynamic> or a List<dynamic> or a String or a int or a double or a bool or null
   /// in this case probably only Map<String, dynamic> and String
   dynamic toJson();
 }
 
-extension APISerdeExtension<T extends APISerde> on T {
+extension BEAMSerdeExtension<T extends BEAMSerde> on T {
   String toJsonStr() {
     return jsonEncode(this.toJson());
   }
@@ -18,14 +18,14 @@ class UnreachableError extends Error {
   UnreachableError(this.message);
 }
 
-class UnknownAPIObject implements APISerde {
-  const UnknownAPIObject({this.rawValue});
+class UnknownBEAMObject implements BEAMSerde {
+  const UnknownBEAMObject({this.rawValue});
 
   final dynamic rawValue;
 
   @override
   dynamic toJson() => {};
 
-  factory UnknownAPIObject.fromJson(dynamic json) =>
-      UnknownAPIObject(rawValue: json);
+  factory UnknownBEAMObject.fromJson(dynamic json) =>
+      UnknownBEAMObject(rawValue: json);
 }

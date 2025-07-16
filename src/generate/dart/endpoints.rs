@@ -70,7 +70,7 @@ impl<'a> EndpointAdder<'a> {
         cpf!(imports_content, "import '{}';", root_frag_file_name);
         let mut content = String::new();
         content.push_str(&imports_content);
-        content.push_str(&format!("typedef APIPathEnum={};\n", path_enum_name));
+        content.push_str(&format!("typedef BEAMPathEnum={};\n", path_enum_name));
         content.push_str(&paths_enum_content);
         content.push_str(&interface_content);
         out_files.push(File {
@@ -111,15 +111,15 @@ impl<'a> EndpointAdder<'a> {
             "/// {}",
             route.description.unwrap_or("").replace("\n", "\n/// ")
         );
-        cpf!(c, "class API{} extends APIPath {{", name);
+        cpf!(c, "class BEAM{} extends BEAMPath {{", name);
         cpf!(
             c,
-            "  API{}({{required super.interpolatedPath, required super.handler}})",
+            "  BEAM{}({{required super.interpolatedPath, required super.handler}})",
             name
         );
         cpf!(
             c,
-            "    :super(path: APIPathEnum.fromJson('{}'));",
+            "    :super(path: BEAMPathEnum.fromJson('{}'));",
             route.path
         );
         for method in &route.endpoints {
@@ -264,7 +264,7 @@ impl<'a> EndpointAdder<'a> {
                     "\n\t\t{}",
                     params_as_json_body_str.replace("\n", "\n\t\t")
                 ));
-                cpf!(s, "return handle(method: APIRequestMethod.{}, params: paramsJson, body: {}).then((json) => {});", method_str,match (&body_str, &body_is_primitive) {
+                cpf!(s, "return handle(method: BEAMRequestMethod.{}, params: paramsJson, body: {}).then((json) => {});", method_str,match (&body_str, &body_is_primitive) {
                     (Some(_), true) => "body",
                     (Some(_), false) => "body.toJson()",
                     (None, _) => "null",
@@ -323,7 +323,7 @@ impl<'a> EndpointAdder<'a> {
         let mut imports_str = String::new();
 
         use intermediate::RouteFragment;
-        let mut class_name = format!("API{}Frag_{}", name, "unknown");
+        let mut class_name = format!("BEAM{}Frag_{}", name, "unknown");
         match fragment {
             RouteFragment::Node(node) => {
                 cpf!(
@@ -332,10 +332,10 @@ impl<'a> EndpointAdder<'a> {
                     "../".repeat(depth)
                 );
                 let sanitized_frag_name = sanitize(node.path_fragment_name.as_str());
-                class_name = format!("API{}Frag_{}", name, sanitized_frag_name);
+                class_name = format!("BEAM{}Frag_{}", name, sanitized_frag_name);
 
                 let sub_dir_name = format!("{}_frags", node.path_fragment_name);
-                cpf!(s, "class {} extends APIWithParent {{", class_name);
+                cpf!(s, "class {} extends BEAMWithParent {{", class_name);
                 cpf!(
                     s,
                     "\t{}({{required super.deps, required super.parent{}}}) : super(ownFragment: {});\n",
@@ -420,7 +420,7 @@ impl<'a> EndpointAdder<'a> {
                     "../".repeat(depth),
                     sanitized_route_str
                 ));
-                class_name = format!("API{}Methods", sanitized_route_str);
+                class_name = format!("BEAM{}Methods", sanitized_route_str);
             }
         };
         imports_str.push_str(&s);
@@ -470,7 +470,7 @@ fn mk_params(params: &[intermediate::Param], name: &str) -> (String, String) {
 impl intermediate::Method {
     #[allow(dead_code)]
     fn enum_string(&self) -> String {
-        format!("APIRequestMethod.{}", self.string())
+        format!("BEAMRequestMethod.{}", self.string())
     }
     fn string(&self) -> &str {
         match self {

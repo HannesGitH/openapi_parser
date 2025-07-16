@@ -256,7 +256,7 @@ impl<'a> SchemeAdder<'a> {
         }
 
         content.push_str(&format!(
-            "\n{}sealed class {} implements APISerde {{\n\t{}{}();",
+            "\n{}sealed class {} implements BEAMSerde {{\n\t{}{}();",
             doc_str,
             class_name,
             if self.vars_should_be_final {
@@ -379,7 +379,7 @@ impl<'a> SchemeAdder<'a> {
             .collect::<Vec<(_, _, _, _)>>();
         let mut content = String::new();
         content.push_str(&format!(
-            "\n{}enum {} implements APISerde {{\n",
+            "\n{}enum {} implements BEAMSerde {{\n",
             doc_str, class_name
         ));
         for (orig_value, enum_value, _, desc) in allowed_values_str.iter() {
@@ -556,7 +556,7 @@ impl<'a> SchemeAdder<'a> {
         content.push_str("\n\n");
 
         content.push_str(&format!(
-            "{}class {} implements APISerde {{\n",
+            "{}class {} implements BEAMSerde {{\n",
             doc_str, class_name
         ));
         for prop in properties.iter() {
@@ -717,7 +717,7 @@ fn to_dart_prim(primitive: &intermediate::types::Primitive) -> String {
         intermediate::types::Primitive::Number => "num".to_string(),
         intermediate::types::Primitive::Integer => "int".to_string(),
         intermediate::types::Primitive::Boolean => "bool".to_string(),
-        intermediate::types::Primitive::Never => "UnknownAPIObject".to_string(),
+        intermediate::types::Primitive::Never => "UnknownBEAMObject".to_string(),
         intermediate::types::Primitive::List(_) => "List".to_string(),
         intermediate::types::Primitive::Map(_) => "Map".to_string(),
         intermediate::types::Primitive::Enum(_) => "Enum".to_string(),

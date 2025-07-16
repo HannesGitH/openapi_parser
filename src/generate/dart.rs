@@ -10,7 +10,7 @@ mod serde;
 
 impl super::Generator for DartGenerator {
     async fn generate(&self, spec: &oas3::Spec) -> Result<Vec<super::File>, String> {
-        let class_prefix = "API";
+        let class_prefix = "BEAM";
         let class_suffix = "Model";
         let mut out = Vec::new();
         serde::add_serde_utils(&mut out);
