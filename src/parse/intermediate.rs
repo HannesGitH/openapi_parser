@@ -282,6 +282,7 @@ fn parse_object(object: &ObjectSchema, is_optional: bool) -> Result<IAST, Error>
     // otherwise we need to parse the object, and return the algebraic type
     // 1: if its has any_of or one_of set, we need to return a sum type
     // 2: if its has properties set, we need to return a product type
+    // 3  if it has all of set its probably a nullable ref weird edge case situation
 
     // 1:
     if !object.any_of.is_empty() || !object.one_of.is_empty() {
@@ -300,10 +301,7 @@ fn parse_object(object: &ObjectSchema, is_optional: bool) -> Result<IAST, Error>
         let nullable = union_types.iter().any(|schema| match schema {
             ObjectOrReference::Object(schema) => 
                 schema.is_nullable().unwrap_or(false) || 
-                if let Some(SchemaTypeSet::Single(typ)) = schema.schema_type { 
-                    typ == SchemaType::Null || 
-                    typ == SchemaType::Object // this shouldn't be needed but for some reason null turn into object in this case
-                } else { false },
+                if let Some(SchemaTypeSet::Single(SchemaType::Null)) = schema.schema_type { true } else { false },
             ObjectOrReference::Ref { .. } => false,
         });
         return Ok(IAST::Object(AnnotatedObj {
@@ -343,6 +341,20 @@ fn parse_object(object: &ObjectSchema, is_optional: bool) -> Result<IAST, Error>
     // 2:
     if !object.properties.is_empty() {
         return parse_properties();
+    }
+
+    // 3:
+    if !object.all_of.is_empty() {
+        let all = &object.all_of;
+        if all.len() == 2 && all.iter().any(|schema| matches!(schema, ObjectOrReference::Ref { .. })) {
+            if let Some(ObjectOrReference::Ref { ref_path }) = all.iter().find(|schema| matches!(schema, ObjectOrReference::Ref { .. })) {
+                return Ok(IAST::Reference(AnnotatedReference {
+                    path: ref_path,
+                    optional: is_optional,
+                    nullable: true,
+                }));
+            }
+        }
     }
 
     println!("got to an empty object");
