@@ -289,6 +289,7 @@ fn parse_object(object: &ObjectSchema, is_nullable: bool) -> Result<IAST, Error>
                     .map(|(idx, schema)| 
                         match parse_schema(schema, false) {
                             Ok(obj) => Ok((match &descrimination_keys {
+                                // https://linear.app/blingos/issue/DEV-4659/beam-make-union-type-typenames-more-friendly
                                 //TODO: this might not be deterministic order...
                                 // yeah, unfortunately it isnt..
                                 // instead we actually have to check the values, but as most subtypes are behind a spec reference its hard to get to these values
