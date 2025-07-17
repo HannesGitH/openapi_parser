@@ -147,6 +147,7 @@ impl<'a> EndpointAdder<'a> {
                         content,
                     });
                     imports_str.push_str(&format!("import '{}';\n", &dep_path_str));
+                    imports_str.push_str(&format!("export '{}';\n", &dep_path_str));
                     let body_type_str = match special_case {
                         Some(schemes::GenerationSpecialCase { reason, type_name }) => {
                             (
@@ -208,6 +209,7 @@ impl<'a> EndpointAdder<'a> {
                             content: f.content,
                         }));
                         imports_str.push_str(&format!("import '{}';\n", &dep_path_str));
+                        imports_str.push_str(&format!("export '{}';\n", &dep_path_str));
                         match special_case {
                             Some(schemes::GenerationSpecialCase { reason, type_name }) => (
                                 type_name,
@@ -409,6 +411,7 @@ impl<'a> EndpointAdder<'a> {
                     }));
                     deps.push(sub_frag_file);
                     imports_str.push_str(&format!("import '{}';\n", child_file_name));
+                    imports_str.push_str(&format!("export '{}';\n", child_file_name));
                 }
                 cpf!(s, "}}\n");
             }

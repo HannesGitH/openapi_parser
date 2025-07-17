@@ -253,6 +253,7 @@ impl<'a> SchemeAdder<'a> {
 
         for f in file_dependencies.iter() {
             content.push_str(&format!("import '{}';\n", f.path.display()));
+            content.push_str(&format!("export '{}';\n", f.path.display()));
         }
 
         content.push_str(&format!(
@@ -552,6 +553,7 @@ impl<'a> SchemeAdder<'a> {
         ));
         for f in file_dependencies.iter() {
             content.push_str(&format!("import '{}';\n", f.path.display()));
+            content.push_str(&format!("export '{}';\n", f.path.display()));
         }
         content.push_str("\n\n");
 
