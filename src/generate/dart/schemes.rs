@@ -225,23 +225,24 @@ impl<'a> SchemeAdder<'a> {
         &self,
         name: &str,
         doc_str: &str,
-        sum: &Vec<intermediate::IAST>,
+        // (name, type)
+        sum: &Vec<(String, intermediate::IAST)>,
         depth: usize,
     ) -> (String, Vec<File>) {
         let class_name = self.class_name(name);
         let mut file_dependencies = Vec::new();
         let mut sub_file_dependencies = Vec::new();
 
-        let index_to_name = |idx: usize| format!("{}{}", name, idx);
+        let index_to_name = |idx: &String| format!("{}{}", name, idx);
 
         let mut variants = Vec::new();
 
-        for (idx, iast) in sum.iter().enumerate() {
-            let variant_name = index_to_name(idx);
+        for (union_inner_name, iast) in sum.iter() {
+            let variant_name = index_to_name(union_inner_name);
             let (content, depends_on_files, not_built, nullable) =
                 self.parse_named_iast(&variant_name, iast, depth + 1);
             file_dependencies.push(File {
-                path: std::path::PathBuf::from(format!("{}/{}.dart", name, idx)),
+                path: std::path::PathBuf::from(format!("{}/{}.dart", name, union_inner_name)),
                 content,
             });
             variants.push((self.class_name(&variant_name), not_built, nullable));

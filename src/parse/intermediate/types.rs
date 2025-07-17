@@ -108,7 +108,8 @@ pub enum IAST<'a> {
 /// Algebraic Type
 #[derive(Debug, PartialEq, Eq)]
 pub enum AlgType<'a> {
-    Sum(Vec<IAST<'a>>),
+    // name -> type
+    Sum(Vec<(String, IAST<'a>)>),
     Product(HashMap<&'a str, IAST<'a>>),
 }
 

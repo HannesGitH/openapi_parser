@@ -271,6 +271,12 @@ fn parse_object(object: &ObjectSchema, is_nullable: bool) -> Result<IAST, Error>
         } else {
             &object.one_of
         };
+        let descrimination_keys =match &object.discriminator {
+            Some(Discriminator { mapping: Some(mapping), property_name }) => {
+                Some(mapping.clone().into_keys().collect::<Vec<_>>())
+            }
+            _ => None,
+        };
         return Ok(IAST::Object(AnnotatedObj {
             nullable: is_nullable,
             is_deprecated: object.deprecated.unwrap_or(false),
@@ -279,8 +285,22 @@ fn parse_object(object: &ObjectSchema, is_nullable: bool) -> Result<IAST, Error>
             value: AlgType::Sum(
                 match union_types
                     .iter()
-                    .map(|schema| parse_schema(schema, false))
-                    .collect::<Result<Vec<_>, _>>()
+                    .enumerate()
+                    .map(|(idx, schema)| 
+                        match parse_schema(schema, false) {
+                            Ok(obj) => Ok((match &descrimination_keys {
+                                //TODO: this might not be deterministic order...
+                                // yeah, unfortunately it isnt..
+                                // instead we actually have to check the values, but as most subtypes are behind a spec reference its hard to get to these values
+                                // Some(keys) => keys[idx].clone(),
+                                _ => idx.to_string(),
+                            }, obj)),
+                            Err(e) => {
+                                return Err(e);
+                            }
+                        }
+                    )
+                    .collect::<Result<Vec<(_, _)>, _>>()
                 {
                     Ok(types) => types,
                     Err(e) => return Err(e),
