@@ -115,7 +115,11 @@ fn parse_request(request: Option<&ObjectOrReference<RequestBody>>) -> Result<IAS
                 .unwrap();
             parse_schema(scheme, false)
         }
-        Some(ObjectOrReference::Ref { ref_path, .. }) => Ok(IAST::Reference(ref_path)),
+        Some(ObjectOrReference::Ref { ref_path, .. }) => Ok(IAST::Reference(AnnotatedReference {
+            path: ref_path,
+            optional: false,
+            nullable: false,
+        })),
         None => Err(Error::ParseError("No request body".to_string())),
     }
 }
@@ -138,7 +142,11 @@ fn parse_responses<'a>(
                 }
             }
             ObjectOrReference::Ref { ref_path, .. } => {
-                let schema = IAST::Reference(&ref_path);
+                let schema = IAST::Reference(AnnotatedReference {
+                    path: ref_path,
+                    optional: false,
+                    nullable: false,
+                });
                 map.insert(code, schema);
             }
         }
@@ -148,20 +156,28 @@ fn parse_responses<'a>(
 
 fn parse_schema(
     schema: &ObjectOrReference<ObjectSchema>,
-    is_nullable: bool,
+    is_optional: bool,
 ) -> Result<IAST, Error> {
     match schema {
-        ObjectOrReference::Object(object) => parse_object(object, is_nullable),
-        ObjectOrReference::Ref { ref_path, .. } => Ok(IAST::Reference(ref_path)),
+        ObjectOrReference::Object(object) => parse_object(object, is_optional),
+        ObjectOrReference::Ref { ref_path } => Ok(IAST::Reference(AnnotatedReference {
+            path: ref_path,
+            optional: is_optional,
+            //TODO
+            //TODO
+            //TODO: merajs second bug
+            nullable: false,
+        })),
     }
 }
 
-fn parse_object(object: &ObjectSchema, is_nullable: bool) -> Result<IAST, Error> {
+fn parse_object(object: &ObjectSchema, is_optional: bool) -> Result<IAST, Error> {
     let parse_properties = || {
         // if either the parent said its nullable (by not being required) or itself is nullable
-        let is_nullable = is_nullable || object.is_nullable().unwrap_or(false);
+        let is_nullable = object.is_nullable().unwrap_or(false);
         Ok(IAST::Object(AnnotatedObj {
             nullable: is_nullable,
+            optional: is_optional,
             is_deprecated: object.deprecated.unwrap_or(false),
             description: object.description.as_deref(),
             title: object.title.as_deref(),
@@ -172,6 +188,10 @@ fn parse_object(object: &ObjectSchema, is_nullable: bool) -> Result<IAST, Error>
                     .map(|(name, schema)| {
                         let is_required = object.required.iter().any(|n|n.as_str() == name.as_str());
                         // println!("parsing property: {}, nullable: {}", name, !is_required);
+
+                        if name.starts_with("dummy") {
+                            println!("v1001: {} optional:{:?} {:?}", name, !is_required, schema);
+                        }
 
                         //TODO: there was a case where a required object could either be an object or null, but the oas3 spec properties where empty although the json had some, idk
                         match parse_schema(schema, !is_required) {
@@ -250,7 +270,8 @@ fn parse_object(object: &ObjectSchema, is_nullable: bool) -> Result<IAST, Error>
         if prim_type != &SchemaType::Object {
             let value = parse_prim_type(prim_type);
             return Ok(IAST::Primitive(AnnotatedObj {
-                nullable: is_nullable || types.contains(SchemaType::Null),
+                nullable: types.contains(SchemaType::Null),
+                optional: is_optional,
                 is_deprecated: object.deprecated.unwrap_or(false),
                 description: object.description.as_deref(),
                 title: object.title.as_deref(),
@@ -278,7 +299,11 @@ fn parse_object(object: &ObjectSchema, is_nullable: bool) -> Result<IAST, Error>
             _ => None,
         };
         return Ok(IAST::Object(AnnotatedObj {
-            nullable: is_nullable,
+            nullable: union_types.iter().any(|schema| match schema {
+                ObjectOrReference::Object(schema) => schema.is_nullable().unwrap_or(false),
+                ObjectOrReference::Ref { .. } => false,
+            }),
+            optional: is_optional,
             is_deprecated: object.deprecated.unwrap_or(false),
             description: object.description.as_deref(),
             title: object.title.as_deref(),
@@ -320,6 +345,7 @@ fn parse_object(object: &ObjectSchema, is_nullable: bool) -> Result<IAST, Error>
     //TODO: hmm
     Ok(IAST::Primitive(AnnotatedObj {
         nullable: true,
+        optional: is_optional,
         is_deprecated: object.deprecated.unwrap_or(false),
         description: {
             let desc = &object.description;

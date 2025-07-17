@@ -129,7 +129,7 @@ impl<'a> EndpointAdder<'a> {
                 Some(request) => {
                     //do things
                     let request_name = format!("{}{}Request", name, method_str);
-                    let (content, sub_deps, special_case, nullable) = self
+                    let (content, sub_deps, special_case, nullable, optional) = self
                         .scheme_adder
                         .parse_named_iast(&request_name, request, depth + 1);
                     deps.extend(sub_deps.into_iter().map(|f| File {
@@ -190,7 +190,7 @@ impl<'a> EndpointAdder<'a> {
                     let response_name = format!("{}_{}Response", name, method_str);
                     if responses.len() == 1 {
                         let (response_code, response) = responses.first_key_value().unwrap();
-                        let (content, sub_deps, special_case, nullable) = self
+                        let (content, sub_deps, special_case, nullable, optional) = self
                             .scheme_adder
                             .parse_named_iast(&response_name, &response, depth + 1);
                         let dep_path_str =

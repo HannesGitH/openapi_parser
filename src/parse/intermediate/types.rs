@@ -89,10 +89,18 @@ pub enum Method {
 #[derive(Debug, PartialEq, Eq)]
 pub struct AnnotatedObj<'a, T> {
     pub nullable: bool,
+    pub optional: bool,
     pub is_deprecated: bool,
     pub description: Option<&'a str>,
     pub title: Option<&'a str>,
     pub value: T,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct AnnotatedReference<'a> {
+    pub path: &'a str,
+    pub optional: bool,
+    pub nullable: bool,
 }
 
 /// Intermediate Abstract Syntax Tree
@@ -101,7 +109,7 @@ pub enum IAST<'a> {
     Object(AnnotatedObj<'a, AlgType<'a>>),
     /// reference to an ast
     /// ie #/components/schemas/SomeSchema
-    Reference(&'a str),
+    Reference(AnnotatedReference<'a>),
     Primitive(AnnotatedObj<'a, Primitive<'a>>),
 }
 
