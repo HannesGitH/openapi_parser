@@ -22,7 +22,7 @@ pub fn parse(spec: &oas3::Spec) -> Result<IntermediateFormat, Error> {
     for (name, schema) in components.schemas.iter() {
         schemes.push(Scheme {
             name: name.as_str(),
-            obj: match parse_schema(schema, false) {
+            obj: match parse_schema(schema, false, false) {
                 Ok(obj) => obj,
                 Err(e) => return Err(e),
             },
@@ -113,7 +113,7 @@ fn parse_request(request: Option<&ObjectOrReference<RequestBody>>) -> Result<IAS
                 .schema
                 .as_ref()
                 .unwrap();
-            parse_schema(scheme, false)
+            parse_schema(scheme, false, false)
         }
         Some(ObjectOrReference::Ref { ref_path, .. }) => Ok(IAST::Reference(AnnotatedReference {
             path: ref_path,
@@ -137,7 +137,7 @@ fn parse_responses<'a>(
                     None => return Err(Error::ParseError("No response body".to_string())),
                 };
                 if let Some(schema) = scheme {
-                    let schema = parse_schema(&schema, false).unwrap();
+                    let schema = parse_schema(&schema, false, false).unwrap();
                     map.insert(code, schema);
                 }
             }
@@ -157,16 +157,15 @@ fn parse_responses<'a>(
 fn parse_schema(
     schema: &ObjectOrReference<ObjectSchema>,
     is_optional: bool,
+    // only used in rare edge case where we have an object that is only a ref but can also be null
+    ref_is_nullable: bool,
 ) -> Result<IAST, Error> {
     match schema {
         ObjectOrReference::Object(object) => parse_object(object, is_optional),
         ObjectOrReference::Ref { ref_path } => Ok(IAST::Reference(AnnotatedReference {
             path: ref_path,
             optional: is_optional,
-            //TODO
-            //TODO
-            //TODO: merajs second bug
-            nullable: false,
+            nullable: ref_is_nullable,
         })),
     }
 }
@@ -194,7 +193,7 @@ fn parse_object(object: &ObjectSchema, is_optional: bool) -> Result<IAST, Error>
                         }
 
                         //TODO: there was a case where a required object could either be an object or null, but the oas3 spec properties where empty although the json had some, idk
-                        match parse_schema(schema, !is_required) {
+                        match parse_schema(schema, !is_required, false) {
                             Ok(obj) => Ok((name.as_str(), obj)),
                             Err(e) => Err(e),
                         }
@@ -241,7 +240,7 @@ fn parse_object(object: &ObjectSchema, is_optional: bool) -> Result<IAST, Error>
                 }
             },
             SchemaType::Array => match &object.items {
-                Some(items) => match parse_schema(&items, false) {
+                Some(items) => match parse_schema(&items, false, false) {
                     Ok(obj) => Primitive::List(Box::new(obj)),
                     Err(e) => {
                         println!("error parsing list: {:?}", e);
@@ -298,11 +297,17 @@ fn parse_object(object: &ObjectSchema, is_optional: bool) -> Result<IAST, Error>
             }
             _ => None,
         };
+        let nullable = union_types.iter().any(|schema| match schema {
+            ObjectOrReference::Object(schema) => 
+                schema.is_nullable().unwrap_or(false) || 
+                if let Some(SchemaTypeSet::Single(typ)) = schema.schema_type { 
+                    typ == SchemaType::Null || 
+                    typ == SchemaType::Object // this shouldn't be needed but for some reason null turn into object in this case
+                } else { false },
+            ObjectOrReference::Ref { .. } => false,
+        });
         return Ok(IAST::Object(AnnotatedObj {
-            nullable: union_types.iter().any(|schema| match schema {
-                ObjectOrReference::Object(schema) => schema.is_nullable().unwrap_or(false),
-                ObjectOrReference::Ref { .. } => false,
-            }),
+            nullable,
             optional: is_optional,
             is_deprecated: object.deprecated.unwrap_or(false),
             description: object.description.as_deref(),
@@ -312,7 +317,7 @@ fn parse_object(object: &ObjectSchema, is_optional: bool) -> Result<IAST, Error>
                     .iter()
                     .enumerate()
                     .map(|(idx, schema)| 
-                        match parse_schema(schema, false) {
+                        match parse_schema(schema, false, nullable) {
                             Ok(obj) => Ok((match &descrimination_keys {
                                 // https://linear.app/blingos/issue/DEV-4659/beam-make-union-type-typenames-more-friendly
                                 //TODO: this might not be deterministic order...
