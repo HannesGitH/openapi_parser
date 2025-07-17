@@ -20,12 +20,18 @@ pub fn parse(spec: &oas3::Spec) -> Result<IntermediateFormat, Error> {
         None => return Err(Error::NoComponents),
     };
     for (name, schema) in components.schemas.iter() {
+        let obj = match parse_schema(schema, false, false) {
+            Ok(obj) => obj,
+            Err(e) => return Err(e),
+        };
         schemes.push(Scheme {
             name: name.as_str(),
-            obj: match parse_schema(schema, false, false) {
-                Ok(obj) => obj,
-                Err(e) => return Err(e),
+            is_inherently_nullable: match &obj {
+                IAST::Object(obj) => obj.nullable,
+                IAST::Reference(refe) => refe.nullable,
+                IAST::Primitive(prim) => prim.nullable,
             },
+            obj,
         });
     }
 

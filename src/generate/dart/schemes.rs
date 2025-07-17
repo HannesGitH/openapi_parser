@@ -39,8 +39,11 @@ impl<'a> SchemeAdder<'a> {
     ) {
         let mut scheme_files = Vec::new();
         for scheme in self.complete_iast.unwrap().schemes.iter() {
-            let (content, depends_on_files, _, _nullable, _optional) =
-                self.parse_named_iast(scheme.name, &scheme.obj, 0);
+            let (mut content, depends_on_files, _, _nullable, _optional) =
+                self.parse_named_iast(format!("{}{}", scheme.name, if scheme.is_inherently_nullable { "NonNull" } else { "" }).as_str(), &scheme.obj, 0);
+            if scheme.is_inherently_nullable     {
+                cpf!(content,"typedef {} = {}?;", self.class_name(scheme.name), self.class_name(format!("{}NonNull", scheme.name).as_str()));
+            }
             let file = File {
                 path: std::path::PathBuf::from(format!("{}.dart", scheme.name)),
                 content,
@@ -628,9 +631,9 @@ impl<'a> SchemeAdder<'a> {
                 prop.name,
                 create_property_name(prop.name),
                 if let PropertyType::Normal = prop.prop_type {
-                    format!("{}.toJson()", if prop.nullable { "?" } else { "" })
+                    "?.toJson()"
                 } else {
-                    "".to_string()
+                    ""
                 }
             ));
         }

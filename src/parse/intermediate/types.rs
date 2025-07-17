@@ -22,6 +22,7 @@ impl<'a> IntermediateFormat<'a> {
 
 pub struct Scheme<'a> {
     pub name: &'a str,
+    pub is_inherently_nullable: bool,
     pub obj: IAST<'a>,
 }
 
