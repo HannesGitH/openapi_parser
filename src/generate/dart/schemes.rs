@@ -549,20 +549,11 @@ impl<'a> SchemeAdder<'a> {
                 // e.g. List<BEAMSubscriptionModel>
                 type_name = self.class_name(internal_type_name.as_str());
             }
-            let is_optional = match iast {
-                intermediate::IAST::Object(obj) => {
-                    // if obj.optional {
-                    //     println!("optional: {}", p_name);
-                    // }
-                    obj.optional
-                },
-                _ => false,
-            };
             properties.push(Property {
                 name: p_name,
                 typ: type_name,
-                nullable: nullable || is_optional,
-                optional: is_optional,
+                nullable: nullable || optional,
+                optional: optional,
                 doc_str: "".to_string(),
                 prop_type: PropertyType::Normal,
             });
