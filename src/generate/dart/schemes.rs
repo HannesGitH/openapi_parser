@@ -163,9 +163,11 @@ impl<'a> SchemeAdder<'a> {
                             inner_name = internal_type_name;
                         }
 
+                        let outer_name =format!("List<{}>", self.class_name(&inner_name));
+
                         content.push_str(&mk_type_def(
                             name,
-                            &format!("List<{}>", self.class_name(&inner_name)),
+                            &outer_name,
                             true,
                         ));
 
@@ -183,7 +185,11 @@ impl<'a> SchemeAdder<'a> {
                                         })
                                     ),
                                 ),
-                                type_name: self.class_name(name),
+                                //XXX: use `self.class_name(name)` if we want the left part of the typedef 
+                                // e.g. BEAM_v2_billing_subscriptions_subscribeMethods_postResponseModel
+                                // or user `outer_name` for the right part
+                                // e.g. List<BEAMSubscriptionModel>
+                                type_name: outer_name,
                             }),
                             annotated_obj.nullable,
                         )
@@ -528,6 +534,10 @@ impl<'a> SchemeAdder<'a> {
             }) = special_case
             {
                 println!("link: {} {}", internal_type_name, type_name);
+                //XXX: use `self.class_name(name)` if we want the left part of the typedef 
+                // e.g. BEAM_v2_billing_subscriptions_subscribeMethods_postResponseModel
+                // or user `outer_name` for the right part
+                // e.g. List<BEAMSubscriptionModel>
                 type_name = self.class_name(internal_type_name.as_str());
             }
             properties.push(Property {
