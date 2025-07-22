@@ -268,7 +268,7 @@ impl<'a> EndpointAdder<'a> {
                 ));
                 cpf!(s, "return handle(method: BEAMRequestMethod.{}, params: paramsJson, body: {}).then((json) => {});", method_str,match (&body_str, &body_is_primitive) {
                     (Some(_), true) => "body",
-                    (Some(_), false) => "body.toJson()",
+                    (Some(_), false) => "body?.toJson()",
                     (None, _) => "null",
                 }, match (ret_is_primitive, ret_list_inner_type) {
                     (true, None) => "json".to_string(),
