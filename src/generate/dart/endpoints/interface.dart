@@ -10,7 +10,6 @@ abstract interface class JsonRequestHandler {
 
 enum BEAMExpectedResponseType {
   json,
-  stream,
   binary,
 }
 

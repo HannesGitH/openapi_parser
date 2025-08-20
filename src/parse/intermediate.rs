@@ -109,7 +109,7 @@ fn parse_params(params: &Vec<ObjectOrReference<Parameter>>) -> Result<Vec<Param>
 fn parse_request(request: Option<&ObjectOrReference<RequestBody>>) -> Result<IAST, Error> {
     match request {
         Some(ObjectOrReference::Object(req_body)) => {
-            // its application/json only for us
+            //we only consider a single possible format (like application/json) for now
             let scheme = req_body
                 .content
                 .iter()
@@ -136,7 +136,7 @@ fn parse_responses<'a>(
     for (code, response) in responses {
         match response {
             ObjectOrReference::Object(req_body) => {
-                // its application/json only for us
+                //we only consider a single possible format (like application/json) for now
                 let scheme_opt = &req_body.content.iter().next();
                 let scheme = match scheme_opt {
                     Some(schema) => &schema.1.schema,
@@ -177,6 +177,16 @@ fn parse_schema(
 }
 
 fn parse_object(object: &ObjectSchema, is_optional: bool) -> Result<IAST, Error> {
+    if object.format == Some("binary".to_string()) {
+        return Ok(IAST::Primitive(AnnotatedObj {
+            nullable: false,
+            optional: is_optional,
+            is_deprecated: object.deprecated.unwrap_or(false),
+            description: object.description.as_deref(),
+            title: object.title.as_deref(),
+            value: Primitive::Binary,
+        }));
+    }
     let parse_properties = || {
         // if either the parent said its nullable (by not being required) or itself is nullable
         let is_nullable = object.is_nullable().unwrap_or(false);

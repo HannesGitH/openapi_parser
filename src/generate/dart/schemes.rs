@@ -737,16 +737,18 @@ pub fn create_property_name(name: &str) -> String {
 }
 
 fn to_dart_prim(primitive: &intermediate::types::Primitive) -> String {
+    use intermediate::types::Primitive;
     match primitive {
-        intermediate::types::Primitive::String => "String".to_string(),
-        intermediate::types::Primitive::Number => "num".to_string(),
-        intermediate::types::Primitive::Integer => "int".to_string(),
-        intermediate::types::Primitive::Boolean => "bool".to_string(),
-        intermediate::types::Primitive::Never => "UnknownBEAMObject".to_string(),
-        intermediate::types::Primitive::List(_) => "List".to_string(),
-        intermediate::types::Primitive::Map(_) => "Map".to_string(),
-        intermediate::types::Primitive::Enum(_) => "Enum".to_string(),
-        intermediate::types::Primitive::Dynamic => "dynamic".to_string(),
+        Primitive::String => "String".to_string(),
+        Primitive::Number => "num".to_string(),
+        Primitive::Integer => "int".to_string(),
+        Primitive::Boolean => "bool".to_string(),
+        Primitive::Never => "UnknownBEAMObject".to_string(),
+        Primitive::List(_) => "List".to_string(),
+        Primitive::Map(_) => "Map".to_string(),
+        Primitive::Enum(_) => "Enum".to_string(),
+        Primitive::Dynamic => "dynamic".to_string(),
+        Primitive::Binary => "Uint8List".to_string(),
     }
 }
 

@@ -134,4 +134,5 @@ pub enum Primitive<'a> {
     // each (value, is_string), is_string
     Enum(Vec<(String, bool)>),
     Dynamic,
+    Binary,
 }
