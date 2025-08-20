@@ -133,6 +133,7 @@ impl<'a> SchemeAdder<'a> {
                             "// ignore_for_file: unused_import\nimport '../{}utils/serde.dart';\n\n",
                             "../".repeat(depth)
                         ));
+                        ret.push_str("import 'dart:typed_data';\n");
                     }
                     let name = self.class_name(name);
                     ret.push_str(&format!("{}typedef {} = {};\n", doc_str, name, typ));
