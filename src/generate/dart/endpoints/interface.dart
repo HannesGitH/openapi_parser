@@ -4,7 +4,14 @@ abstract interface class JsonRequestHandler {
     required String path,
     Map<String, String> params = const {},
     dynamic body,
+    BEAMExpectedResponseType expectedResponseType = BEAMExpectedResponseType.json,
   });
+}
+
+enum BEAMExpectedResponseType {
+  json,
+  stream,
+  binary,
 }
 
 typedef BEAMRequestLeafDeps = JsonRequestHandler;
@@ -29,12 +36,14 @@ abstract class BEAMPath {
     required BEAMRequestMethod method,
     Map<String, String> params = const {},
     dynamic body = const {},
+    BEAMExpectedResponseType expectedResponseType = BEAMExpectedResponseType.json,
   }) {
     return handler.handle(
       method: method,
       path: interpolatedPath,
       params: params,
       body: body,
+      expectedResponseType: expectedResponseType,
     );
   }
 }
