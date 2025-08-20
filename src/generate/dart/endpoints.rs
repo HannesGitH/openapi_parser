@@ -108,6 +108,7 @@ impl<'a> EndpointAdder<'a> {
             "import '{}utils/serde.dart';",
             "../".repeat(depth + 1)
         );
+        cpf!(imports_str, "import 'dart:typed_data';\n");
         cpf!(c, "/// {}", route.path);
         cpf!(
             c,
