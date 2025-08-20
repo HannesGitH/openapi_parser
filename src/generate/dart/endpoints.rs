@@ -247,7 +247,7 @@ impl<'a> EndpointAdder<'a> {
                                     || if let GenerationSpecialCaseType::List(_, is_primitive) =
                                         &reason
                                     {
-                                        is_primitive.clone()
+                                        *is_primitive
                                     } else {
                                         false
                                     },

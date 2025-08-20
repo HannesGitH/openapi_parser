@@ -212,7 +212,10 @@ impl<'a> SchemeAdder<'a> {
                         (
                             mk_type_def(name, &typ, false),
                             vec![],
-                            None,
+                            Some(GenerationSpecialCase {
+                                reason: GenerationSpecialCaseType::Primitive,
+                                type_name: typ,
+                            }),
                             annotated_obj.nullable,
                             annotated_obj.optional,
                             true,
