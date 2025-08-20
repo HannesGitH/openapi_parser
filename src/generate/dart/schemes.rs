@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use super::super::interface::*;
 
+use crate::parse::intermediate::{AlgType, AnnotatedObj, Primitive};
 #[allow(unused_imports)]
 use crate::{cpf, parse::intermediate};
 
@@ -39,7 +40,7 @@ impl<'a> SchemeAdder<'a> {
     ) {
         let mut scheme_files = Vec::new();
         for scheme in self.complete_iast.unwrap().schemes.iter() {
-            let (mut content, depends_on_files, _, _nullable, _optional) =
+            let (mut content, depends_on_files, _, _nullable, _optional, _is_binary) =
                 self.parse_named_iast(format!("{}{}", scheme.name, if scheme.is_inherently_nullable { "NonNull" } else { "" }).as_str(), &scheme.obj, 0);
             if scheme.is_inherently_nullable     {
                 cpf!(content,"typedef {} = {}?;", self.class_name(scheme.name), self.class_name(format!("{}NonNull", scheme.name).as_str()));
@@ -79,7 +80,7 @@ impl<'a> SchemeAdder<'a> {
         name: &str,
         iast: &intermediate::IAST,
         depth: usize,
-    ) -> (String, Vec<File>, Option<GenerationSpecialCase>, bool, bool) {
+    ) -> (String, Vec<File>, Option<GenerationSpecialCase>, bool, bool, bool) {
         match iast {
             intermediate::IAST::Object(annotated_obj) => {
                 let doc_str = mk_doc_str(name, annotated_obj, 0);
@@ -90,14 +91,14 @@ impl<'a> SchemeAdder<'a> {
                         let (content, files) = self.generate_sum_type(name, &doc_str, sum, depth);
                         let nullable = annotated_obj.nullable;
                         let optional = annotated_obj.optional;
-                        (content, files, None, nullable, optional)
+                        (content, files, None, nullable, optional, false)
                     }
                     AlgType::Product(product) => {
                         let (content, files) =
                             self.generate_product_type(name, &doc_str, product, depth);
                         let nullable = annotated_obj.nullable;
                         let optional = annotated_obj.optional;
-                        (content, files, None, nullable, optional)
+                        (content, files, None, nullable, optional, false)
                     }
                 }
             }
@@ -119,6 +120,8 @@ impl<'a> SchemeAdder<'a> {
                     }),
                     annotated_ref.nullable,
                     annotated_ref.optional,
+                    // is binary: NO
+                    false,
                 )
             }
             intermediate::IAST::Primitive(annotated_obj) => {
@@ -149,11 +152,11 @@ impl<'a> SchemeAdder<'a> {
                         ret.push_str(&mk_type_def(name, &class_name, false));
 
                         ret.push_str(&content);
-                        (ret, vec![], None, annotated_obj.nullable, annotated_obj.optional)
+                        (ret, vec![], None, annotated_obj.nullable, annotated_obj.optional, false)
                     }
                     intermediate::types::Primitive::List(inner_iast) => {
                         let mut inner_name = &format!("{}_", name);
-                        let (mut content, depends_on_files, inner_special_case, _nullable, _optional) =
+                        let (mut content, depends_on_files, inner_special_case, _nullable, _optional, _is_binary) =
                             self.parse_named_iast(&inner_name, inner_iast, depth);
                         let mut file_dependencies = Vec::new();
 
@@ -200,6 +203,18 @@ impl<'a> SchemeAdder<'a> {
                             }),
                             annotated_obj.nullable,
                             annotated_obj.optional,
+                            false,
+                        )
+                    }
+                    intermediate::types::Primitive::Binary => {
+                        let typ = to_dart_prim(&annotated_obj.value);
+                        (
+                            mk_type_def(name, &typ, false),
+                            vec![],
+                            None,
+                            annotated_obj.nullable,
+                            annotated_obj.optional,
+                            true,
                         )
                     }
                     intermediate::types::Primitive::Never => {
@@ -210,6 +225,7 @@ impl<'a> SchemeAdder<'a> {
                             None,
                             annotated_obj.nullable,
                             annotated_obj.optional,
+                            false,
                         )
                     }
                     _ => {
@@ -223,6 +239,7 @@ impl<'a> SchemeAdder<'a> {
                             }),
                             annotated_obj.nullable,
                             annotated_obj.optional,
+                            false,
                         )
                     }
                 }
@@ -249,7 +266,7 @@ impl<'a> SchemeAdder<'a> {
 
         for (union_inner_name, iast) in sum.iter() {
             let variant_name = index_to_name(union_inner_name);
-            let (content, depends_on_files, not_built, nullable, optional) =
+            let (content, depends_on_files, not_built, nullable, optional, is_binary) =
                 self.parse_named_iast(&variant_name, iast, depth + 1);
             file_dependencies.push(File {
                 path: std::path::PathBuf::from(format!("{}/{}.dart", name, union_inner_name)),
@@ -470,7 +487,7 @@ impl<'a> SchemeAdder<'a> {
                     }
                     intermediate::types::Primitive::List(inner_iast) => {
                         let mut full_name = &format!("{}_{}", name, p_name);
-                        let (content, depends_on_files, inner_special_case, _nullable, _optional) =
+                        let (content, depends_on_files, inner_special_case, _nullable, _optional, _is_binary) =
                             self.parse_named_iast(&full_name, inner_iast, depth + 1);
 
                         if let Some(GenerationSpecialCase {
@@ -503,7 +520,7 @@ impl<'a> SchemeAdder<'a> {
                     }
                     intermediate::types::Primitive::Map(inner_iast) => {
                         let full_name = format!("{}_{}", name, p_name);
-                        let (content, depends_on_files, _, _nullable, _optional) =
+                        let (content, depends_on_files, _, _nullable, _optional, _is_binary) =
                             self.parse_named_iast(&full_name, inner_iast, depth + 1);
                         file_dependencies.push(File {
                             path: std::path::PathBuf::from(format!("{}/{}.dart", name, p_name)),
@@ -538,7 +555,7 @@ impl<'a> SchemeAdder<'a> {
             }
             let full_name = format!("{}_{}", name, p_name);
             let mut type_name = self.class_name(&full_name);
-            let (content, depends_on_files, special_case, nullable, optional) =
+            let (content, depends_on_files, special_case, nullable, optional, _is_binary) =
                 self.parse_named_iast(&full_name, iast, depth + 1);
             if let Some(GenerationSpecialCase {
                 reason: GenerationSpecialCaseType::Link(internal_type_name),

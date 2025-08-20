@@ -129,7 +129,7 @@ impl<'a> EndpointAdder<'a> {
                 Some(request) => {
                     //do things
                     let request_name = format!("{}{}Request", name, method_str);
-                    let (content, sub_deps, special_case, nullable, optional) = self
+                    let (content, sub_deps, special_case, nullable, optional, _is_binary) = self
                         .scheme_adder
                         .parse_named_iast(&request_name, request, depth + 1);
                     deps.extend(sub_deps.into_iter().map(|f| File {
@@ -182,15 +182,15 @@ impl<'a> EndpointAdder<'a> {
             let (params_1typedef_str, params_as_json_body_str) =
                 &mk_params(&method.params, &param_name);
 
-            let (ret_type_str, ret_is_primitive, ret_list_inner_type) = {
+            let (ret_type_str, ret_is_primitive, ret_list_inner_type, ret_is_binary) = {
                 let responses = &method.responses;
                 if responses.is_empty() {
-                    ("()".to_string(), true, None)
+                    ("()".to_string(), true, None, false)
                 } else {
                     let response_name = format!("{}_{}Response", name, method_str);
                     if responses.len() == 1 {
                         let (response_code, response) = responses.first_key_value().unwrap();
-                        let (content, sub_deps, special_case, nullable, optional) = self
+                        let (content, sub_deps, special_case, nullable, optional, ret_is_binary) = self
                             .scheme_adder
                             .parse_named_iast(&response_name, &response, depth + 1);
                         let dep_path_str =
@@ -248,14 +248,16 @@ impl<'a> EndpointAdder<'a> {
                                 } else {
                                     None
                                 },
+                                ret_is_binary
                             ),
-                            None => (self.scheme_adder.class_name(&response_name), false, None),
+                            None => (self.scheme_adder.class_name(&response_name), false, None, ret_is_binary),
                         }
                     } else {
                         (
                             "//TODO: add parser for multiple responses".to_string(),
                             false,
                             None,
+                            false,
                         )
                     }
                 }
@@ -266,7 +268,7 @@ impl<'a> EndpointAdder<'a> {
                     "\n\t\t{}",
                     params_as_json_body_str.replace("\n", "\n\t\t")
                 ));
-                cpf!(s, "return handle(method: BEAMRequestMethod.{}, params: paramsJson, body: {}).then((json) => {});", method_str,match (&body_str, &body_is_primitive) {
+                cpf!(s, "return handle(method: BEAMRequestMethod.{}, params: paramsJson, body: {}, expectedResponseType: {}).then((json) => {});", method_str,match (&body_str, &body_is_primitive) {
                     (Some(_), true) => "body",
                     (Some(_), false) => "body?.toJson()",
                     (None, _) => "null",
@@ -275,6 +277,9 @@ impl<'a> EndpointAdder<'a> {
                     (true, Some(inner_type)) => format!("json"),
                     (false, Some(inner_type)) => format!("(json as List).map((e) => {}.fromJson(e)).toList()", inner_type),
                     (false, None) => format!("{}.fromJson(json)", ret_type_str),
+                }, match ret_is_binary {
+                    true => "BEAMExpectedResponseType.binary",
+                    false => "BEAMExpectedResponseType.json",
                 });
                 s
             };
