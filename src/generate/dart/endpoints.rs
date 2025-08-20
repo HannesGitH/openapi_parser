@@ -1,5 +1,8 @@
 use crate::{
-    generate::{dart::schemes::{sanitize, GenerationSpecialCaseType}, File},
+    generate::{
+        dart::schemes::{sanitize, GenerationSpecialCaseType},
+        File,
+    },
     parse::intermediate::{self, Route, RouteFragmentLeafData},
 };
 
@@ -151,7 +154,7 @@ impl<'a> EndpointAdder<'a> {
                     let body_type_str = match special_case {
                         Some(schemes::GenerationSpecialCase { reason, type_name }) => {
                             (
-                                type_name, 
+                                type_name,
                                 match reason {
                                     GenerationSpecialCaseType::List(_, is_primitive) => true,
                                     GenerationSpecialCaseType::Primitive => true,
@@ -159,7 +162,9 @@ impl<'a> EndpointAdder<'a> {
                                     GenerationSpecialCaseType::Link(_) => false,
                                 },
                                 match reason {
-                                    GenerationSpecialCaseType::List(inner_type, _) => Some(inner_type),
+                                    GenerationSpecialCaseType::List(inner_type, _) => {
+                                        Some(inner_type)
+                                    }
                                     _ => None,
                                 },
                             )
@@ -190,9 +195,12 @@ impl<'a> EndpointAdder<'a> {
                     let response_name = format!("{}_{}Response", name, method_str);
                     if responses.len() == 1 {
                         let (response_code, response) = responses.first_key_value().unwrap();
-                        let (content, sub_deps, special_case, nullable, optional, ret_is_binary) = self
-                            .scheme_adder
-                            .parse_named_iast(&response_name, &response, depth + 1);
+                        let (content, sub_deps, special_case, nullable, optional, ret_is_binary) =
+                            self.scheme_adder.parse_named_iast(
+                                &response_name,
+                                &response,
+                                depth + 1,
+                            );
                         let dep_path_str =
                             format!("{}/{}.resp.{}.schema.dart", name, method_str, response_code);
                         let dep_path = std::path::PathBuf::from(&dep_path_str);
@@ -248,9 +256,14 @@ impl<'a> EndpointAdder<'a> {
                                 } else {
                                     None
                                 },
-                                ret_is_binary
+                                ret_is_binary,
                             ),
-                            None => (self.scheme_adder.class_name(&response_name), false, None, ret_is_binary),
+                            None => (
+                                self.scheme_adder.class_name(&response_name),
+                                false,
+                                None,
+                                ret_is_binary,
+                            ),
                         }
                     } else {
                         (
@@ -272,14 +285,14 @@ impl<'a> EndpointAdder<'a> {
                     (Some(_), true) => "body",
                     (Some(_), false) => "body?.toJson()",
                     (None, _) => "null",
+                }, match ret_is_binary {
+                    true => "BEAMExpectedResponseType.binary",
+                    false => "BEAMExpectedResponseType.json",
                 }, match (ret_is_primitive, ret_list_inner_type) {
                     (true, None) => "json".to_string(),
                     (true, Some(inner_type)) => format!("json"),
                     (false, Some(inner_type)) => format!("(json as List).map((e) => {}.fromJson(e)).toList()", inner_type),
                     (false, None) => format!("{}.fromJson(json)", ret_type_str),
-                }, match ret_is_binary {
-                    true => "BEAMExpectedResponseType.binary",
-                    false => "BEAMExpectedResponseType.json",
                 });
                 s
             };
