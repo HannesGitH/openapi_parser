@@ -55,12 +55,33 @@ impl<'a> SchemeAdder<'a> {
                     &scheme.obj,
                     0,
                 );
+
             if scheme.is_inherently_nullable {
+                // lol irgendwann sollte man mal auf ne templating engine umsteigen
                 cpf!(
                     content,
-                    "typedef {} = {}?;",
-                    self.class_name(scheme.name),
-                    self.class_name(format!("{}NonNull", scheme.name).as_str())
+                    "        
+class BEAM{}Model implements BEAMSerde {{
+
+    BEAM{}Model(this.value);
+    final BEAM{}NonNullModel? value;
+    factory BEAM{}Model.fromJson(Map<String, dynamic>? json) {{
+        if (json == null) {{
+            return BEAM{}Model(null);
+        }}
+        return BEAM{}Model(BEAM{}NonNullModel.fromJson(json));
+    }}
+
+    toJson() => value?.toJson();
+}}
+                        ",
+                    scheme.name,
+                    scheme.name,
+                    scheme.name,
+                    scheme.name,
+                    scheme.name,
+                    scheme.name,
+                    scheme.name,
                 );
             }
             let file = File {
@@ -231,7 +252,7 @@ impl<'a> SchemeAdder<'a> {
                                             reason: GenerationSpecialCaseType::Primitive,
                                             ..
                                         })
-                                    )
+                                    ),
                                 ),
                                 //XXX: use `self.class_name(name)` if we want the left part of the typedef
                                 // e.g. BEAM_v2_billing_subscriptions_subscribeMethods_postResponseModel
