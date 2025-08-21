@@ -30,20 +30,38 @@ impl<'a> SchemeAdder<'a> {
         }
     }
 
-    pub(super) fn set_complete_iast(&mut self, intermediate: &'a intermediate::IntermediateFormat<'a>) {
+    pub(super) fn set_complete_iast(
+        &mut self,
+        intermediate: &'a intermediate::IntermediateFormat<'a>,
+    ) {
         self.complete_iast = Some(intermediate);
     }
 
-    pub(super) fn add_schemes(
-        & self,
-        out: &mut Vec<File>,
-    ) {
+    pub(super) fn add_schemes(&self, out: &mut Vec<File>) {
         let mut scheme_files = Vec::new();
         for scheme in self.complete_iast.unwrap().schemes.iter() {
-            let (mut content, depends_on_files, _, _nullable, _optional, _is_binary) =
-                self.parse_named_iast(format!("{}{}", scheme.name, if scheme.is_inherently_nullable { "NonNull" } else { "" }).as_str(), &scheme.obj, 0);
-            if scheme.is_inherently_nullable     {
-                cpf!(content,"typedef {} = {}?;", self.class_name(scheme.name), self.class_name(format!("{}NonNull", scheme.name).as_str()));
+            let (mut content, depends_on_files, _, _nullable, _optional, _is_binary) = self
+                .parse_named_iast(
+                    format!(
+                        "{}{}",
+                        scheme.name,
+                        if scheme.is_inherently_nullable {
+                            "NonNull"
+                        } else {
+                            ""
+                        }
+                    )
+                    .as_str(),
+                    &scheme.obj,
+                    0,
+                );
+            if scheme.is_inherently_nullable {
+                cpf!(
+                    content,
+                    "typedef {} = {}?;",
+                    self.class_name(scheme.name),
+                    self.class_name(format!("{}NonNull", scheme.name).as_str())
+                );
             }
             let file = File {
                 path: std::path::PathBuf::from(format!("{}.dart", scheme.name)),
@@ -80,7 +98,14 @@ impl<'a> SchemeAdder<'a> {
         name: &str,
         iast: &intermediate::IAST,
         depth: usize,
-    ) -> (String, Vec<File>, Option<GenerationSpecialCase>, bool, bool, bool) {
+    ) -> (
+        String,
+        Vec<File>,
+        Option<GenerationSpecialCase>,
+        bool,
+        bool,
+        bool,
+    ) {
         match iast {
             intermediate::IAST::Object(annotated_obj) => {
                 let doc_str = mk_doc_str(name, annotated_obj, 0);
@@ -153,12 +178,25 @@ impl<'a> SchemeAdder<'a> {
                         ret.push_str(&mk_type_def(name, &class_name, false));
 
                         ret.push_str(&content);
-                        (ret, vec![], None, annotated_obj.nullable, annotated_obj.optional, false)
+                        (
+                            ret,
+                            vec![],
+                            None,
+                            annotated_obj.nullable,
+                            annotated_obj.optional,
+                            false,
+                        )
                     }
                     intermediate::types::Primitive::List(inner_iast) => {
                         let mut inner_name = &format!("{}_", name);
-                        let (mut content, depends_on_files, inner_special_case, _nullable, _optional, _is_binary) =
-                            self.parse_named_iast(&inner_name, inner_iast, depth);
+                        let (
+                            mut content,
+                            depends_on_files,
+                            inner_special_case,
+                            _nullable,
+                            _optional,
+                            _is_binary,
+                        ) = self.parse_named_iast(&inner_name, inner_iast, depth);
                         let mut file_dependencies = Vec::new();
 
                         for f in depends_on_files.into_iter() {
@@ -174,29 +212,35 @@ impl<'a> SchemeAdder<'a> {
                             inner_name = internal_type_name;
                         }
 
-                        let outer_name =format!("List<{}>", self.class_name(&inner_name));
+                        let outer_name = format!("List<{}>", self.class_name(&inner_name));
 
-                        content.push_str(&mk_type_def(
-                            name,
-                            &outer_name,
-                            true,
-                        ));
+                        content.push_str(&mk_type_def(name, &outer_name, true));
 
                         (
                             content,
                             file_dependencies,
                             Some(GenerationSpecialCase {
                                 reason: GenerationSpecialCaseType::List(
+                                    // the type of elements in the list
                                     self.class_name(&inner_name),
+                                    // weather the elements in the list are primitive
                                     matches!(
                                         inner_special_case,
                                         Some(GenerationSpecialCase {
                                             reason: GenerationSpecialCaseType::Primitive,
                                             ..
                                         })
+                                    ) && 
+                                    // if the inside of the list are enum values we need to parse them with .fromJson, and therefor they are not considered primitive in this case
+                                    !matches!(
+                                        **inner_iast,
+                                        intermediate::IAST::Primitive(AnnotatedObj {
+                                            value: Primitive::Enum(_),
+                                            ..
+                                        })
                                     ),
                                 ),
-                                //XXX: use `self.class_name(name)` if we want the left part of the typedef 
+                                //XXX: use `self.class_name(name)` if we want the left part of the typedef
                                 // e.g. BEAM_v2_billing_subscriptions_subscribeMethods_postResponseModel
                                 // or user `outer_name` for the right part
                                 // e.g. List<BEAMSubscriptionModel>
@@ -328,9 +372,7 @@ impl<'a> SchemeAdder<'a> {
                 Some(GenerationSpecialCase {
                     type_name: _,
                     reason: GenerationSpecialCaseType::Link(internal_type_name),
-                }) => {
-                    &self.class_name(internal_type_name)
-                },
+                }) => &self.class_name(internal_type_name),
                 _ => v,
             };
 
@@ -363,11 +405,12 @@ impl<'a> SchemeAdder<'a> {
                     Some(GenerationSpecialCase {
                         reason: GenerationSpecialCaseType::List(inner_type, is_primitive),
                         type_name: _,
-                    }) => if *is_primitive {
-                        format!("value.map((e) => e as {}).toList()", inner_type)
-                    } else {
-                        format!("value.map((e) => e.toJson()).toList()")
-                    },
+                    }) =>
+                        if *is_primitive {
+                            format!("value.map((e) => e as {}).toList()", inner_type)
+                        } else {
+                            format!("value.map((e) => e.toJson()).toList()")
+                        },
                     _ => "value.toJson()".to_string(),
                 }
             ));
@@ -383,11 +426,15 @@ impl<'a> SchemeAdder<'a> {
                     Some(GenerationSpecialCase {
                         reason: GenerationSpecialCaseType::List(inner_type, is_primitive),
                         type_name: _,
-                    }) => if *is_primitive {
-                        format!("(json as List).map((e) => e as {}).toList()", inner_type)
-                    } else {
-                        format!("(json as List).map((e) => {}.fromJson(e)).toList()", inner_type)
-                    },
+                    }) =>
+                        if *is_primitive {
+                            format!("(json as List).map((e) => e as {}).toList()", inner_type)
+                        } else {
+                            format!(
+                                "(json as List).map((e) => {}.fromJson(e)).toList()",
+                                inner_type
+                            )
+                        },
                     _ => format!("{}.fromJson(json)", value_type_name),
                 }
             ));
@@ -428,22 +475,30 @@ impl<'a> SchemeAdder<'a> {
         }
         content.push_str(&"\t;\n\n\t@override\n\tdynamic toJson() => switch(this) {\n");
         for (orig_value, enum_value, is_string, _) in allowed_values_str.iter() {
-            content.push_str(&format!("\t\tt_{} => {},\n", enum_value, if *is_string {
-                format!("'{}'", orig_value)
-            } else {
-                orig_value.to_string()
-            }));
+            content.push_str(&format!(
+                "\t\tt_{} => {},\n",
+                enum_value,
+                if *is_string {
+                    format!("'{}'", orig_value)
+                } else {
+                    orig_value.to_string()
+                }
+            ));
         }
         content.push_str(&format!(
             "\t}};\n\tfactory {}.fromJson(dynamic json) => switch(json) {{\n",
             class_name
         ));
         for (orig_value, enum_value, is_string, _) in allowed_values_str.iter() {
-            content.push_str(&format!("\t\t{} => t_{},\n", if *is_string {
-                format!("'{}'", orig_value)
-            } else {
-                orig_value.to_string()
-            }, enum_value));
+            content.push_str(&format!(
+                "\t\t{} => t_{},\n",
+                if *is_string {
+                    format!("'{}'", orig_value)
+                } else {
+                    orig_value.to_string()
+                },
+                enum_value
+            ));
         }
         content.push_str(&format!(
             "\t\t_ => throw UnreachableError('{}'),\n",
@@ -491,8 +546,14 @@ impl<'a> SchemeAdder<'a> {
                     }
                     intermediate::types::Primitive::List(inner_iast) => {
                         let mut full_name = &format!("{}_{}", name, p_name);
-                        let (content, depends_on_files, inner_special_case, _nullable, _optional, _is_binary) =
-                            self.parse_named_iast(&full_name, inner_iast, depth + 1);
+                        let (
+                            content,
+                            depends_on_files,
+                            inner_special_case,
+                            _nullable,
+                            _optional,
+                            _is_binary,
+                        ) = self.parse_named_iast(&full_name, inner_iast, depth + 1);
 
                         if let Some(GenerationSpecialCase {
                             type_name: _,
@@ -567,7 +628,7 @@ impl<'a> SchemeAdder<'a> {
             }) = special_case
             {
                 println!("link: {} {}", internal_type_name, type_name);
-                //XXX: use `self.class_name(name)` if we want the left part of the typedef 
+                //XXX: use `self.class_name(name)` if we want the left part of the typedef
                 // e.g. BEAM_v2_billing_subscriptions_subscribeMethods_postResponseModel
                 // or user `outer_name` for the right part
                 // e.g. List<BEAMSubscriptionModel>
