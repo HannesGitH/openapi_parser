@@ -285,7 +285,8 @@ class BEAM{}Model implements BEAMSerde {{
                             mk_type_def(name, &typ, false),
                             vec![],
                             None,
-                            annotated_obj.nullable,
+                            // this is never nullable, as its never (simplifies usage a bit, by not having to set an explicit value)
+                            false,
                             annotated_obj.optional,
                             false,
                         )

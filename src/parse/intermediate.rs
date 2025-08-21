@@ -377,7 +377,8 @@ fn parse_object(object: &ObjectSchema, is_optional: bool) -> Result<IAST, Error>
 
     //TODO: hmm
     Ok(IAST::Primitive(AnnotatedObj {
-        nullable: true,
+        // its value is already of type dynamic and therefor nullable internally
+        nullable: false,
         optional: is_optional,
         is_deprecated: object.deprecated.unwrap_or(false),
         description: {
