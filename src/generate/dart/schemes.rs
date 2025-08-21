@@ -181,6 +181,7 @@ impl<'a> SchemeAdder<'a> {
                         (
                             ret,
                             vec![],
+                            // enums are not considered primitive because e.g. they need to be parsed with .fromJson
                             None,
                             annotated_obj.nullable,
                             annotated_obj.optional,
@@ -230,15 +231,7 @@ impl<'a> SchemeAdder<'a> {
                                             reason: GenerationSpecialCaseType::Primitive,
                                             ..
                                         })
-                                    ) && 
-                                    // if the inside of the list are enum values we need to parse them with .fromJson, and therefor they are not considered primitive in this case
-                                    !matches!(
-                                        **inner_iast,
-                                        intermediate::IAST::Primitive(AnnotatedObj {
-                                            value: Primitive::Enum(_),
-                                            ..
-                                        })
-                                    ),
+                                    )
                                 ),
                                 //XXX: use `self.class_name(name)` if we want the left part of the typedef
                                 // e.g. BEAM_v2_billing_subscriptions_subscribeMethods_postResponseModel
@@ -577,6 +570,11 @@ impl<'a> SchemeAdder<'a> {
                             PropertyType::Primitive(PrimitivePropertyType::List {
                                 inner_type: inner_class_name,
                                 inner_is_primitive: match **inner_iast {
+                                    // enums are not considered primitive in dart because e.g. they need to be parsed with .fromJson
+                                    intermediate::IAST::Primitive(AnnotatedObj {
+                                        value: Primitive::Enum(_),
+                                        ..
+                                    }) => false,
                                     intermediate::IAST::Primitive(_) => true,
                                     _ => false,
                                 },
