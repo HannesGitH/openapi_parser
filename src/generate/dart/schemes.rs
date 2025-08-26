@@ -733,9 +733,21 @@ class BEAM{}Model implements BEAMSerde {{
                 prop.name,
                 create_property_name(prop.name),
                 if let PropertyType::Normal = prop.prop_type {
-                    "?.toJson()"
+                    String::from("?.toJson()")
                 } else {
-                    ""
+                    match &prop.prop_type {
+                        PropertyType::Primitive(PrimitivePropertyType::List {
+                            inner_type,
+                            inner_is_primitive,
+                        }) => {
+                            format!(
+                                "?.map((e) => {}{}).toList()",
+                                inner_type,
+                                if *inner_is_primitive { "" } else { ".toJson()" }
+                            )
+                        }
+                        _ => "".to_string(),
+                    }
                 }
             ));
         }
