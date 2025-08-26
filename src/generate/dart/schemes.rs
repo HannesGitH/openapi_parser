@@ -741,9 +741,12 @@ class BEAM{}Model implements BEAMSerde {{
                             inner_is_primitive,
                         }) => {
                             format!(
-                                "?.map((e) => {}{}).toList()",
-                                inner_type,
-                                if *inner_is_primitive { "" } else { ".toJson()" }
+                                "?.map((e) => {}).toList()",
+                                if *inner_is_primitive {
+                                    "e"
+                                } else {
+                                    "e.toJson()"
+                                }
                             )
                         }
                         _ => "".to_string(),
