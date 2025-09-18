@@ -26,6 +26,10 @@ impl std::fmt::Display for DestinationLanguage {
 }
 
 async fn fetch_spec_json(url: &str) -> Result<String, reqwest::Error> {
+    let fake = true;
+    if fake {
+        return Ok(include_str!("../test_scheme.json").to_string());
+    }
     let username = std::env::var("SWAGGER_BASIC_USER");
     let password = std::env::var("SWAGGER_BASIC_PASS");
 
