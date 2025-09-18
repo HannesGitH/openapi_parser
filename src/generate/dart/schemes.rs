@@ -366,18 +366,17 @@ class BEAM{}Model implements BEAMSerde {{
         ));
         content.push_str("\n\n\t@Deprecated(\"not deprecated, but usage is highly discouraged, as its not deterministic\")");
         content.push_str(&format!(
-            "\n\tfactory {}.fromJson(dynamic json) {{",
+            "\n\tfactory {}.fromJson(dynamic json) {{\n\t\tfinal errors = <String,Object>{{}};",
             class_name
         ));
         for (v, _, variant_nullable) in variants.iter() {
             content.push_str(&format!(
-                "\n\t\ttry{{\n\t\t\treturn {}_.fromJson(json);\n\t\t}} catch(e) {{}}",
-                v
+                "\n\t\ttry{{\n\t\t\treturn {}_.fromJson(json);\n\t\t}} catch(e) {{errors['{}']=e;}}",
+                v, v
             ));
         }
         content.push_str(&format!(
-            "\n\t\tthrow Exception('Could not parse json into {}');\n\t}}",
-            class_name
+            "\n\t\tthrow BEAMUnionParseMultiError(errors);\n\t}}",
         ));
 
         content.push_str("\n}\n\n");

@@ -18,6 +18,20 @@ class UnreachableError extends Error {
   UnreachableError(this.message);
 }
 
+class BEAMUnionParseMultiError extends Error {
+  final Map<String, Object> errors;
+  BEAMUnionParseMultiError(this.errors);
+
+  @override
+  String toString() {
+    var string = '$BEAMUnionParseMultiError\n';
+    for (final key in errors.keys) {
+      string += ' - $key: ${errors[key].toString().replaceAll('\n', '\n\t')}';
+    }
+    return string;
+  }
+}
+
 class UnknownBEAMObject implements BEAMSerde {
   const UnknownBEAMObject({this.rawValue});
 
