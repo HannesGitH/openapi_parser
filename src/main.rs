@@ -26,7 +26,7 @@ impl std::fmt::Display for DestinationLanguage {
 }
 
 async fn fetch_spec_json(url: &str) -> Result<String, reqwest::Error> {
-    let fake = true;
+    let fake = false;
     if fake {
         return Ok(include_str!("../test_scheme.json").to_string());
     }
