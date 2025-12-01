@@ -515,7 +515,7 @@ class BEAM{}Model implements BEAMSerde {{
             ));
         }
         content.push_str(&format!(
-            "\t\tdynamic s => throw UnreachableError('{}: unknown value $s'),\n",
+            "\t\tdynamic s => throw BEAMUnknownValueError('{}: unknown value $s'),\n",
             class_name
         ));
         content.push_str("  };\n");
