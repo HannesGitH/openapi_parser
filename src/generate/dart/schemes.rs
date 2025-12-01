@@ -786,7 +786,7 @@ class BEAM{}Model implements BEAMSerde {{
                             )
                         }
                         PrimitivePropertyType::Default => {
-                            format!("json['{}']", prop.name)
+                            format!("((val){{ if (val is {}) return val; throw BEAMWrongTypeError('$val is not of type {} for property {}'); }})(json['{}'])", prop.typ, prop.typ, prop.name, prop.name)
                         }
                     }
                 } else {

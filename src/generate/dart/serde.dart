@@ -13,9 +13,14 @@ extension BEAMSerdeExtension<T extends BEAMSerde> on T {
   }
 }
 
-class UnreachableError extends Error {
+class BEAMUnknownValueError extends Error {
   final String? message;
-  UnreachableError(this.message);
+  BEAMUnknownValueError(this.message);
+}
+
+class BEAMWrongTypeError extends Error {
+  final String? message;
+  BEAMWrongTypeError(this.message);
 }
 
 class BEAMUnionParseMultiError extends Error {
