@@ -143,6 +143,12 @@ class BEAMCachedResponse<T> {
   Future<T> get actual => _upstreamFuture;
 
   Stream<T> get stream => _streamController.stream;
+
+  BEAMCachedResponse<T2> then<T2>(T2 Function(T) onValue) =>
+      BEAMCachedResponse<T2>(
+        upstreamFuture: _upstreamFuture.then(onValue),
+        cachedFuture: _cachedFuture?.then(onValue),
+      );
 }
 
 abstract class BEAMCacheHandler {
