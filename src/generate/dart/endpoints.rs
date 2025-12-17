@@ -282,7 +282,7 @@ impl<'a> EndpointAdder<'a> {
                     "\n\t\t{}",
                     params_as_json_body_str.replace("\n", "\n\t\t")
                 ));
-                cpf!(s, "return handle(method: BEAMRequestMethod.{}, params: paramsJson, body: {}, expectedResponseType: {}).then((json) => {});", method_str,match (&body_str, &body_is_primitive) {
+                cpf!(s, "return handleCached(method: BEAMRequestMethod.{}, params: paramsJson, body: {}, expectedResponseType: {}).then((json) => {});", method_str,match (&body_str, &body_is_primitive) {
                     (Some(_), true) => "body",
                     (Some(_), false) => "body?.toJson()",
                     (None, _) => "null",
@@ -311,7 +311,7 @@ impl<'a> EndpointAdder<'a> {
             );
             cpf!(
                 c,
-                "  Future<{}> {}({}{}){{{}\t}}",
+                "  BEAMCachedResponse<{}> {}({}{}){{{}\t}}",
                 ret_type_str,
                 method_str,
                 params_str,
