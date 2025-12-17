@@ -503,6 +503,9 @@ class BEAM{}Model implements BEAMSerde {{
             "\t}};\n\tfactory {}.fromJson(dynamic json) => switch(json) {{\n",
             class_name
         ));
+        let allows_unspecified = allowed_values_str
+            .iter()
+            .any(|(_, enum_value, _, _)| enum_value == "unspecified");
         for (orig_value, enum_value, is_string, _) in allowed_values_str.iter() {
             content.push_str(&format!(
                 "\t\t{} => t_{},\n",
@@ -515,8 +518,15 @@ class BEAM{}Model implements BEAMSerde {{
             ));
         }
         content.push_str(&format!(
-            "\t\tdynamic s => throw BEAMUnknownValueError('{}: unknown value $s'),\n",
-            class_name
+            "\t\tdynamic s => {}",
+            if allows_unspecified {
+                "t_unspecified".to_string()
+            } else {
+                format!(
+                    "throw BEAMUnknownValueError('{}: unknown value $s'),\n",
+                    class_name
+                )
+            }
         ));
         content.push_str("  };\n");
         content.push_str("}\n");
