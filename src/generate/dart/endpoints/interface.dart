@@ -8,14 +8,7 @@ abstract interface class JsonRequestHandler {
         BEAMExpectedResponseType.json,
   });
 
-  Future<dynamic>? handleCached({
-    required BEAMRequestMethod method,
-    required String path,
-    Map<String, String> params = const {},
-    dynamic body,
-    BEAMExpectedResponseType expectedResponseType =
-        BEAMExpectedResponseType.json,
-  }) => null;
+  BEAMCacheHandler? cache;
 }
 
 enum BEAMExpectedResponseType { json, binary }
@@ -67,8 +60,17 @@ abstract class BEAMPath {
         params: params,
         body: body,
         expectedResponseType: expectedResponseType,
+      ).then(
+        (response) => handler.cache?.storeInCache(
+          response: response,
+          method: method,
+          path: interpolatedPath,
+          params: params,
+          body: body,
+          expectedResponseType: expectedResponseType,
+        ),
       ),
-      cachedFuture: handler.handleCached(
+      cachedFuture: handler.cache?.fetchFromCache(
         method: method,
         path: interpolatedPath,
         params: params,
@@ -141,4 +143,25 @@ class BEAMCachedResponse<T> {
   Future<T> get actual => _upstreamFuture;
 
   Stream<T> get stream => _streamController.stream;
+}
+
+abstract class BEAMCacheHandler {
+  Future<dynamic>? fetchFromCache({
+    required BEAMRequestMethod method,
+    required String path,
+    Map<String, String> params = const {},
+    dynamic body,
+    BEAMExpectedResponseType expectedResponseType =
+        BEAMExpectedResponseType.json,
+  });
+
+  Future<dynamic> storeInCache({
+    required dynamic response,
+    required BEAMRequestMethod method,
+    required String path,
+    Map<String, String> params = const {},
+    dynamic body,
+    BEAMExpectedResponseType expectedResponseType =
+        BEAMExpectedResponseType.json,
+  });
 }
