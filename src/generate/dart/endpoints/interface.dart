@@ -38,13 +38,25 @@ abstract class BEAMPath {
     BEAMExpectedResponseType expectedResponseType =
         BEAMExpectedResponseType.json,
   }) {
-    return handler.handle(
-      method: method,
-      path: interpolatedPath,
-      params: params,
-      body: body,
-      expectedResponseType: expectedResponseType,
-    );
+    return handler
+        .handle(
+          method: method,
+          path: interpolatedPath,
+          params: params,
+          body: body,
+          expectedResponseType: expectedResponseType,
+        )
+        .then((response) {
+          handler.cache?.storeInCache(
+            response: response,
+            method: method,
+            path: interpolatedPath,
+            params: params,
+            body: body,
+            expectedResponseType: expectedResponseType,
+          );
+          return response;
+        });
   }
 
   BEAMCachedResponse<dynamic> handleCached({
@@ -60,17 +72,7 @@ abstract class BEAMPath {
         params: params,
         body: body,
         expectedResponseType: expectedResponseType,
-      ).then((response) {
-        handler.cache?.storeInCache(
-          response: response,
-          method: method,
-          path: interpolatedPath,
-          params: params,
-          body: body,
-          expectedResponseType: expectedResponseType,
-        );
-        return response;
-      }),
+      ),
       cachedFuture: handler.cache?.fetchFromCache(
         method: method,
         path: interpolatedPath,
