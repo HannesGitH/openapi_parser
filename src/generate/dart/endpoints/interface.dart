@@ -50,7 +50,8 @@ abstract class BEAMPath {
           handler.cache?.storeInCache(
             response: response,
             method: method,
-            path: interpolatedPath,
+            interpolatedPath: interpolatedPath,
+            path: path,
             params: params,
             body: body,
             expectedResponseType: expectedResponseType,
@@ -75,7 +76,8 @@ abstract class BEAMPath {
       ),
       cachedFuture: handler.cache?.fetchFromCache(
         method: method,
-        path: interpolatedPath,
+        interpolatedPath: interpolatedPath,
+        path: path,
         params: params,
         body: body,
         expectedResponseType: expectedResponseType,
@@ -157,7 +159,8 @@ class BEAMCachedResponse<T> {
 abstract class BEAMCacheHandler {
   Future<dynamic>? fetchFromCache({
     required BEAMRequestMethod method,
-    required String path,
+    required String interpolatedPath,
+    required BEAMPathEnum path,
     Map<String, String> params = const {},
     dynamic body,
     BEAMExpectedResponseType expectedResponseType =
@@ -167,7 +170,8 @@ abstract class BEAMCacheHandler {
   Future<dynamic> storeInCache({
     required dynamic response,
     required BEAMRequestMethod method,
-    required String path,
+    required String interpolatedPath,
+    required BEAMPathEnum path,
     Map<String, String> params = const {},
     dynamic body,
     BEAMExpectedResponseType expectedResponseType =
