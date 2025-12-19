@@ -181,7 +181,7 @@ abstract class BEAMCacheHandler {
 
 class FutureHelper {
   static Future<T> anySuccess<T>(List<Future<T>> futures) {
-    var completer = Completer<T?>.sync();
+    var completer = Completer<T>.sync();
     void onValue(T value) {
       if (!completer.isCompleted) completer.complete(value);
     }
