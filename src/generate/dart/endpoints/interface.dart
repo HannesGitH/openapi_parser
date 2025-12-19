@@ -125,12 +125,21 @@ class BEAMCachedResponse<T> {
        _streamController = StreamController<T>() {
     _cachedFuture?.then((value) {
       _streamController.add(value);
+    }, onError: (error, stackTrace) {
+      _streamController.addError(error, stackTrace);
     });
     _upstreamFuture.then((value) async {
       // make sure upstream always comes after cached in the stream, st we never override new data with old data
-      await _cachedFuture;
-      _streamController.add(value);
-      _streamController.close();
+      try {
+        await _cachedFuture;
+      } catch (_) {
+        // we dont care, cache miss already handled above
+      }
+        _streamController.add(value);
+        _streamController.close();
+    }, onError: (error, stackTrace) {
+      // here, the order is not as important, what to do if cache hit, but upstream fails, is up to the user of beam
+      _streamController.addError(error, stackTrace);
     });
   }
 
