@@ -138,7 +138,7 @@ class BEAMCachedResponse<T> {
   final Future<T>? _cachedFuture;
   final StreamController<T> _streamController;
 
-  Future<T> get first => Future.any(
+  Future<T> get first => FutureHelper.anySuccess<T>(
     // todo: update with null-aware-elements
     _cachedFuture != null
         ? [_upstreamFuture, _cachedFuture]
@@ -177,4 +177,38 @@ abstract class BEAMCacheHandler {
     BEAMExpectedResponseType expectedResponseType =
         BEAMExpectedResponseType.json,
   });
+}
+
+class FutureHelper {
+  static Future<T> anySuccess<T>(List<Future<T>> futures) {
+    var completer = Completer<T?>.sync();
+    void onValue(T value) {
+      if (!completer.isCompleted) completer.complete(value);
+    }
+
+    int failedCount = 0;
+    void onError(Object error, StackTrace stack) {
+      if (!completer.isCompleted) {
+        failedCount++;
+        if (failedCount == futures.length) {
+          completer.completeError(AnySuccessError(error));
+        }
+      }
+    }
+
+    for (var future in futures) {
+      future.then(onValue, onError: onError);
+    }
+    return completer.future;
+  }
+}
+
+class AnySuccessError extends Error {
+  final Object lastError;
+  AnySuccessError(this.lastError);
+
+  @override
+  String toString() {
+    return 'No successful future found, last error: $lastError';
+  }
 }
