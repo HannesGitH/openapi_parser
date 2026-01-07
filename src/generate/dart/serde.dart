@@ -43,7 +43,7 @@ class UnknownBEAMObject implements BEAMSerde {
   final dynamic rawValue;
 
   @override
-  dynamic toJson() => {};
+  dynamic toJson() => rawValue;
 
   factory UnknownBEAMObject.fromJson(dynamic json) =>
       UnknownBEAMObject(rawValue: json);
