@@ -238,7 +238,11 @@ fn parse_object(object: &ObjectSchema, is_optional: bool) -> Result<IAST, Error>
         } else {
             None
         };
-        if let Some(enum_values) = enum_values {
+        if let Some(mut enum_values) = enum_values {
+            if let serde_json::Value::Bool(true) = object.extensions["x-extensible-enum"] {
+                // our parser checks for unspecified, so add it
+                enum_values.push(("unspecified".to_string(), false));
+            }
             return Primitive::Enum(enum_values);
         }
         match typ {
