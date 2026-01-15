@@ -328,9 +328,16 @@ class BEAM{}Model implements BEAMSerde {{
         let mut variants = Vec::new();
 
         for (union_inner_name, iast) in sum.iter() {
-            let variant_name = index_to_name(union_inner_name);
+            let mut variant_name = index_to_name(union_inner_name);
             let (content, depends_on_files, not_built, nullable, optional, is_binary) =
                 self.parse_named_iast(&variant_name, iast, depth + 1);
+            if let Some(GenerationSpecialCase {
+                type_name: _,
+                reason: GenerationSpecialCaseType::Link(internal_type_name),
+            }) = &not_built
+            {
+                variant_name = index_to_name(&internal_type_name);
+            }
             file_dependencies.push(File {
                 path: std::path::PathBuf::from(format!("{}/{}.dart", name, union_inner_name)),
                 content,
@@ -382,14 +389,6 @@ class BEAM{}Model implements BEAMSerde {{
         content.push_str("\n}\n\n");
 
         for (v, not_built, variant_nullable) in variants.iter() {
-            let value_type_name = match not_built {
-                Some(GenerationSpecialCase {
-                    type_name: _,
-                    reason: GenerationSpecialCaseType::Link(internal_type_name),
-                }) => &self.class_name(internal_type_name),
-                _ => v,
-            };
-
             content.push_str(&format!("class {}_ extends {} {{\n", v, class_name));
             content.push_str(&format!(
                 "  {}{} value;\n",
@@ -398,7 +397,7 @@ class BEAM{}Model implements BEAMSerde {{
                 } else {
                     ""
                 },
-                value_type_name
+                v
             ));
             content.push_str(&format!(
                 "  {}{}_(this.value);\n",
@@ -449,7 +448,7 @@ class BEAM{}Model implements BEAMSerde {{
                                 inner_type
                             )
                         },
-                    _ => format!("{}.fromJson(json)", value_type_name),
+                    _ => format!("{}.fromJson(json)", v),
                 }
             ));
             content.push_str("}\n\n");
