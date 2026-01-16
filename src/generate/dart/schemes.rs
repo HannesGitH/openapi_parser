@@ -389,6 +389,14 @@ class BEAM{}Model implements BEAMSerde {{
         content.push_str("\n}\n\n");
 
         for (v, not_built, variant_nullable) in variants.iter() {
+            let value_type_name = match not_built {
+                Some(GenerationSpecialCase {
+                    type_name: _,
+                    reason: GenerationSpecialCaseType::Link(internal_type_name),
+                }) => &self.class_name(internal_type_name),
+                _ => v,
+            };
+
             content.push_str(&format!("class {}_ extends {} {{\n", v, class_name));
             content.push_str(&format!(
                 "  {}{} value;\n",
@@ -397,7 +405,7 @@ class BEAM{}Model implements BEAMSerde {{
                 } else {
                     ""
                 },
-                v
+                value_type_name
             ));
             content.push_str(&format!(
                 "  {}{}_(this.value);\n",
@@ -448,7 +456,7 @@ class BEAM{}Model implements BEAMSerde {{
                                 inner_type
                             )
                         },
-                    _ => format!("{}.fromJson(json)", v),
+                    _ => format!("{}.fromJson(json)", value_type_name),
                 }
             ));
             content.push_str("}\n\n");
