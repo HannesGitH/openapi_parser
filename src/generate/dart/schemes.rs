@@ -139,6 +139,13 @@ class BEAM{}Model implements BEAMSerde {{
                         let optional = annotated_obj.optional;
                         (content, files, None, nullable, optional, false)
                     }
+                    AlgType::DiscriminatedSum(discrimination) => {
+                        let (content, files) =
+                            self.generate_discriminated_sum_type(name, &doc_str, discrimination, depth);
+                        let nullable = annotated_obj.nullable;
+                        let optional = annotated_obj.optional;
+                        (content, files, None, nullable, optional, false)
+                    }
                     AlgType::Product(product) => {
                         let (content, files) =
                             self.generate_product_type(name, &doc_str, product, depth);
@@ -466,6 +473,120 @@ class BEAM{}Model implements BEAMSerde {{
             path: std::path::PathBuf::from(format!("{}/{}", name, f.path.display())),
             content: f.content,
         }));
+        (content, file_dependencies)
+    }
+
+    /// Generates a discriminated sum type (tagged union).
+    /// Similar to `generate_sum_type` but simpler - parses the discriminator key first
+    /// and switches on it instead of using try-catch.
+    fn generate_discriminated_sum_type(
+        &self,
+        name: &str,
+        doc_str: &str,
+        discrimination: &intermediate::types::Discrimination,
+        depth: usize,
+    ) -> (String, Vec<File>) {
+        let class_name = self.class_name(name);
+        let file_dependencies = Vec::new();
+
+        // Build variants from discrimination map
+        // (variant_class_name, discriminator_value, referenced_type_name)
+        let mut variants: Vec<(String, &str, String)> = Vec::new();
+
+        for (discriminator_value, annotated_ref) in discrimination.map.iter() {
+            let trimmed_link = annotated_ref.path.replace("#/components/schemas/", "");
+            let variant_class_name = self.class_name(&format!("{}{}", name, trimmed_link));
+            let referenced_type_name = self.class_name(&trimmed_link);
+            variants.push((variant_class_name, discriminator_value, referenced_type_name));
+        }
+
+        let mut content = String::new();
+
+        content.push_str(&format!(
+            "import '../{}utils/serde.dart';\n",
+            "../".repeat(depth)
+        ));
+
+        // Import all referenced types
+        for (_, _, referenced_type_name) in variants.iter() {
+            let trimmed = referenced_type_name
+                .strip_prefix(self.class_prefix)
+                .unwrap_or(referenced_type_name)
+                .strip_suffix(self.class_suffix)
+                .unwrap_or(referenced_type_name);
+            content.push_str(&format!(
+                "import '../{}schemes/{}.dart';\n",
+                "../".repeat(depth),
+                trimmed
+            ));
+        }
+
+        // Sealed class definition
+        content.push_str(&format!(
+            "\n{}sealed class {} implements BEAMSerde {{\n\t{}{}();",
+            doc_str,
+            class_name,
+            if self.vars_should_be_final {
+                "const "
+            } else {
+                ""
+            },
+            class_name
+        ));
+
+        // fromJson factory with switch on discriminator
+        content.push_str(&format!(
+            "\n\n\tfactory {}.fromJson(Map<String, dynamic> json) {{\n",
+            class_name
+        ));
+        content.push_str(&format!(
+            "\t\tfinal discriminator = json['{}'];\n",
+            discrimination.key
+        ));
+        content.push_str("\t\treturn switch(discriminator) {\n");
+
+        for (variant_class_name, discriminator_value, referenced_type_name) in variants.iter() {
+            content.push_str(&format!(
+                "\t\t\t'{}' => {}_({}.fromJson(json)),\n",
+                discriminator_value, variant_class_name, referenced_type_name
+            ));
+        }
+
+        content.push_str(&format!(
+            "\t\t\t_ => throw BEAMUnknownValueError('{}: unknown discriminator value $discriminator'),\n",
+            class_name
+        ));
+        content.push_str("\t\t};\n");
+        content.push_str("\t}\n");
+
+        content.push_str("}\n\n");
+
+        // Generate variant classes
+        for (variant_class_name, _, referenced_type_name) in variants.iter() {
+            content.push_str(&format!("class {}_ extends {} {{\n", variant_class_name, class_name));
+            content.push_str(&format!(
+                "  {}{} value;\n",
+                if self.vars_should_be_final {
+                    "final "
+                } else {
+                    ""
+                },
+                referenced_type_name
+            ));
+            content.push_str(&format!(
+                "  {}{}_({} this.value);\n",
+                if self.vars_should_be_final {
+                    "const "
+                } else {
+                    ""
+                },
+                variant_class_name,
+                referenced_type_name
+            ));
+            content.push_str("\n  @override\n  dynamic toJson() => value.toJson();\n");
+            content.push_str("}\n\n");
+        }
+
         (content, file_dependencies)
     }
 
