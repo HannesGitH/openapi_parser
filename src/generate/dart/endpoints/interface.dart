@@ -116,31 +116,56 @@ abstract class BEAMWithParent implements BEAMHasPath {
   String get path => "${parent.path}/$ownFragment";
 }
 
+sealed class BeamCachedResponseError {
+  final dynamic error;
+
+  @override
+  String toString() => '$runtimeType: $error';
+
+  BeamCachedResponseError(this.error);
+}
+
+final class BeamCacheError extends BeamCachedResponseError {
+  BeamCacheError(super.error);
+}
+
+final class BeamUpstreamError extends BeamCachedResponseError {
+  BeamUpstreamError(super.error);
+}
+
 class BEAMCachedResponse<T> {
   BEAMCachedResponse({
     required Future<T> upstreamFuture,
     required Future<T>? cachedFuture,
   }) : _upstreamFuture = upstreamFuture,
        _cachedFuture = cachedFuture,
-       _streamController = StreamController<T>() {
-    _cachedFuture?.then((value) {
-      _streamController.add(value);
-    }, onError: (error, stackTrace) {
-      _streamController.addError(error, stackTrace);
-    });
-    _upstreamFuture.then((value) async {
-      // make sure upstream always comes after cached in the stream, st we never override new data with old data
-      try {
-        await _cachedFuture;
-      } catch (_) {
-        // we dont care, cache miss already handled above
-      }
+       _streamController =
+           StreamController<T>() {
+    _cachedFuture?.then(
+      (value) {
+        _streamController.add(value);
+      },
+      onError: (error, stackTrace) {
+        // cache-miss is not really an error
+        _streamController.addError(BeamCacheError(error), stackTrace);
+      },
+    );
+    _upstreamFuture.then(
+      (value) async {
+        // make sure upstream always comes after cached in the stream, st we never override new data with old data
+        try {
+          await _cachedFuture;
+        } catch (_) {
+          // we dont care, cache miss already handled above
+        }
         _streamController.add(value);
         _streamController.close();
-    }, onError: (error, stackTrace) {
-      // here, the order is not as important, what to do if cache hit, but upstream fails, is up to the user of beam
-      _streamController.addError(error, stackTrace);
-    });
+      },
+      onError: (error, stackTrace) {
+        // here, the order is not as important, what to do if cache hit, but upstream fails, is up to the user of beam
+        _streamController.addError(BeamUpstreamError(error), stackTrace);
+      },
+    );
   }
 
   final Future<T> _upstreamFuture;
