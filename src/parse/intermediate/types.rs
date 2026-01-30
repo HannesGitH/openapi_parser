@@ -119,6 +119,8 @@ pub enum IAST<'a> {
 pub enum AlgType<'a> {
     // name -> type
     Sum(Vec<(String, IAST<'a>)>),
+    // basically the same as a sum type, but can only have references
+    DiscriminatedSum(Discrimination<'a>),
     Product(HashMap<&'a str, IAST<'a>>),
 }
 
@@ -135,4 +137,10 @@ pub enum Primitive<'a> {
     Enum(Vec<(String, bool)>),
     Dynamic,
     Binary,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Discrimination<'a> {
+    pub key: &'a str,
+    pub map: BTreeMap<&'a str, AnnotatedReference<'a>>,
 }

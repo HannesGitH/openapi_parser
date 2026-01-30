@@ -46,9 +46,9 @@ pub fn parse(spec: &oas3::Spec) -> Result<IntermediateFormat, Error> {
                         let mut endpoints = Vec::new();
 
                         let parser = macros::EndpointParser {
-                            params_parser: Box::new(parse_params),
-                            request_parser: Box::new(parse_request),
-                            responses_parser: Box::new(parse_responses),
+                            params_parser: &parse_params,
+                            request_parser: &parse_request,
+                            responses_parser: &parse_responses,
                         };
 
                         println!("route: {}", path);
@@ -201,7 +201,8 @@ fn parse_object(object: &ObjectSchema, is_optional: bool) -> Result<IAST, Error>
                     .properties
                     .iter()
                     .map(|(name, schema)| {
-                        let is_required = object.required.iter().any(|n|n.as_str() == name.as_str());
+                        let is_required =
+                            object.required.iter().any(|n| n.as_str() == name.as_str());
                         // println!("parsing property: {}, nullable: {}", name, !is_required);
 
                         if name.starts_with("dummy") {
@@ -239,7 +240,9 @@ fn parse_object(object: &ObjectSchema, is_optional: bool) -> Result<IAST, Error>
             None
         };
         if let Some(mut enum_values) = enum_values {
-            if let Some(serde_json::Value::Bool(true)) = object.extensions.get("allow-unspecified-values") {
+            if let Some(serde_json::Value::Bool(true)) =
+                object.extensions.get("allow-unspecified-values")
+            {
                 // our parser checks for unspecified, so add it
                 enum_values.push(("unspecified".to_string(), true));
             }
@@ -312,16 +315,38 @@ fn parse_object(object: &ObjectSchema, is_optional: bool) -> Result<IAST, Error>
         } else {
             &object.one_of
         };
-        let descrimination_keys =match &object.discriminator {
-            Some(Discriminator { mapping: Some(mapping), property_name }) => {
-                Some(mapping.clone().into_keys().collect::<Vec<_>>())
-            }
+        let discrimination = match &object.discriminator {
+            Some(Discriminator {
+                mapping: Some(mapping),
+                property_name,
+            }) => Some(Discrimination {
+                key: property_name.as_str(),
+                // theoretisch können die auch mal kein mapping haben, dann muss die value hinter dem key in dem object den Namen des objects haben
+                map: mapping
+                    .into_iter()
+                    .map(|(k, v)| {
+                        (
+                            k.as_str(),
+                            AnnotatedReference {
+                                path: v.as_str(),
+                                optional: false,
+                                nullable: false,
+                            },
+                        )
+                    })
+                    .collect(),
+            }),
             _ => None,
         };
         let nullable = union_types.iter().any(|schema| match schema {
-            ObjectOrReference::Object(schema) => 
-                schema.is_nullable().unwrap_or(false) || 
-                if let Some(SchemaTypeSet::Single(SchemaType::Null)) = schema.schema_type { true } else { false },
+            ObjectOrReference::Object(schema) => {
+                schema.is_nullable().unwrap_or(false)
+                    || if let Some(SchemaTypeSet::Single(SchemaType::Null)) = schema.schema_type {
+                        true
+                    } else {
+                        false
+                    }
+            }
             ObjectOrReference::Ref { .. } => false,
         });
         return Ok(IAST::Object(AnnotatedObj {
@@ -330,31 +355,33 @@ fn parse_object(object: &ObjectSchema, is_optional: bool) -> Result<IAST, Error>
             is_deprecated: object.deprecated.unwrap_or(false),
             description: object.description.as_deref(),
             title: object.title.as_deref(),
-            value: AlgType::Sum(
-                match union_types
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, schema)| 
-                        match parse_schema(schema, false, nullable) {
-                            Ok(obj) => Ok((match &descrimination_keys {
-                                // https://linear.app/blingos/issue/DEV-4659/beam-make-union-type-typenames-more-friendly
-                                //TODO: this might not be deterministic order...
-                                // yeah, unfortunately it isnt..
-                                // instead we actually have to check the values, but as most subtypes are behind a spec reference its hard to get to these values
-                                // Some(keys) => keys[idx].clone(),
+            value: match union_types
+                .iter()
+                .enumerate()
+                .map(
+                    |(idx, schema)| match parse_schema(schema, false, nullable) {
+                        Ok(obj) => Ok((
+                            match &obj {
+                                IAST::Reference(refe) => {
+                                    refe.path.replace("#/components/schemas/", "")
+                                }
                                 _ => idx.to_string(),
-                            }, obj)),
-                            Err(e) => {
-                                return Err(e);
-                            }
+                            },
+                            obj,
+                        )),
+                        Err(e) => {
+                            return Err(e);
                         }
-                    )
-                    .collect::<Result<Vec<(_, _)>, _>>()
-                {
-                    Ok(types) => types,
-                    Err(e) => return Err(e),
+                    },
+                )
+                .collect::<Result<Vec<(_, _)>, _>>()
+            {
+                Ok(types) => match discrimination {
+                    Some(discrimination) => AlgType::DiscriminatedSum(discrimination),
+                    None => AlgType::Sum(types),
                 },
-            ),
+                Err(e) => return Err(e),
+            },
         }));
     }
 
@@ -366,8 +393,15 @@ fn parse_object(object: &ObjectSchema, is_optional: bool) -> Result<IAST, Error>
     // 3:
     if !object.all_of.is_empty() {
         let all = &object.all_of;
-        if all.len() == 2 && all.iter().any(|schema| matches!(schema, ObjectOrReference::Ref { .. })) {
-            if let Some(ObjectOrReference::Ref { ref_path }) = all.iter().find(|schema| matches!(schema, ObjectOrReference::Ref { .. })) {
+        if all.len() == 2
+            && all
+                .iter()
+                .any(|schema| matches!(schema, ObjectOrReference::Ref { .. }))
+        {
+            if let Some(ObjectOrReference::Ref { ref_path }) = all
+                .iter()
+                .find(|schema| matches!(schema, ObjectOrReference::Ref { .. }))
+            {
                 return Ok(IAST::Reference(AnnotatedReference {
                     path: ref_path,
                     optional: is_optional,

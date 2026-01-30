@@ -7,3 +7,5 @@ node_modules
 
 .direnv
 result
+
+test_scheme.json
