@@ -21,6 +21,9 @@ class BEAMUnknownValueError extends Error {
 class BEAMWrongTypeError extends Error {
   final String? message;
   BEAMWrongTypeError(this.message);
+
+  @override
+  toString() => '$BEAMWrongTypeError: $message';
 }
 
 class BEAMUnionParseMultiError extends Error {
