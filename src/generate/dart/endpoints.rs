@@ -123,8 +123,8 @@ impl<'a> EndpointAdder<'a> {
         );
         cpf!(
             c,
-            "    :super(path: BEAMPathEnum.fromJson('{}'));",
-            route.path
+            "    :super(path: BEAMPathEnum.t_{});",
+            sanitize(route.path)
         );
         for method in &route.endpoints {
             let method_str = method.method.string();
