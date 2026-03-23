@@ -1,45 +1,32 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug executable 'openapi_parser'",
+            "name": "Debug openapi_parser",
             "cargo": {
-                "args": [
-                    "build",
-                    "--bin=openapi_parser",
-                    "--package=openapi_parser"
-                ],
+                "args": ["build"],
                 "filter": {
                     "name": "openapi_parser",
                     "kind": "bin"
                 }
             },
-            "args": [],
+            "args": [
+                "-u", "https://${input:base_url}/openapi-${env:SWAGGER_BASIC_SECR}",
+                "-o", "out/lib/gen",
+                "-d", "dart"
+            ],
+            "envFile": "${workspaceFolder}/.env",
             "cwd": "${workspaceFolder}"
-        },
+        }
+    ],
+    "inputs": [
         {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug unit tests in executable 'openapi_parser'",
-            "cargo": {
-                "args": [
-                    "test",
-                    "--no-run",
-                    "--bin=openapi_parser",
-                    "--package=openapi_parser"
-                ],
-                "filter": {
-                    "name": "openapi_parser",
-                    "kind": "bin"
-                }
-            },
-            "args": [],
-            "cwd": "${workspaceFolder}"
+            "id": "base_url",
+            "description": "Base URL for the API",
+            "default": "api.dev.blingcard.app",
+            "type": "promptString"
         }
     ]
 }
