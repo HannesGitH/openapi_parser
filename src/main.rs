@@ -33,7 +33,10 @@ async fn fetch_spec_json(url: &str) -> Result<String, reqwest::Error> {
     let username = std::env::var("SWAGGER_BASIC_USER");
     let password = std::env::var("SWAGGER_BASIC_PASS");
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .user_agent("curl/8.7.1")
+        .build()
+        .unwrap();
 
     let response = match username {
         Ok(username) => client
