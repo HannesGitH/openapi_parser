@@ -1,6 +1,6 @@
 use crate::{
     generate::{
-        dart::schemes::{sanitize, GenerationSpecialCaseType},
+        dart::schemes::{create_property_name, sanitize, GenerationSpecialCaseType},
         File,
     },
     parse::intermediate::{self, Route, RouteFragmentLeafData},
@@ -355,7 +355,7 @@ impl<'a> EndpointAdder<'a> {
                 let sanitized_frag_name = sanitize(node.path_fragment_name.as_str());
                 class_name = format!("BEAM{}Frag_{}", name, sanitized_frag_name);
 
-                let sub_dir_name = format!("{}_frags", node.path_fragment_name);
+                let sub_dir_name = format!("{}_frags", sanitized_frag_name);
                 cpf!(s, "class {} extends BEAMWithParent {{", class_name);
                 cpf!(
                     s,
@@ -458,6 +458,7 @@ fn mk_params(params: &[intermediate::Param], name: &str) -> (String, String) {
     if !params.is_empty() {
         cpf!(s_typedef, "{{");
         for p in params {
+            let p_ident = create_property_name(p.name);
             cpf!(
                 s_typedef,
                 "  /// {}",
@@ -467,7 +468,7 @@ fn mk_params(params: &[intermediate::Param], name: &str) -> (String, String) {
                 s_typedef,
                 "  String{} {},",
                 if p.required { "" } else { "?" },
-                p.name
+                p_ident
             );
             cpf!(
                 s_as_json_body,
@@ -475,10 +476,10 @@ fn mk_params(params: &[intermediate::Param], name: &str) -> (String, String) {
                 if p.required {
                     String::new()
                 } else {
-                    format!("if (params.{} != null) ", p.name)
+                    format!("if (params.{} != null) ", p_ident)
                 },
                 p.name.replace("$", "\\$"),
-                p.name,
+                p_ident,
                 if p.required { "" } else { "!" }
             );
         }

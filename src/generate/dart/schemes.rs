@@ -40,11 +40,12 @@ impl<'a> SchemeAdder<'a> {
     pub(super) fn add_schemes(&self, out: &mut Vec<File>) {
         let mut scheme_files = Vec::new();
         for scheme in self.complete_iast.unwrap().schemes.iter() {
+            let sanitized_scheme_name = sanitize(scheme.name);
             let (mut content, depends_on_files, _, _nullable, _optional, _is_binary) = self
                 .parse_named_iast(
                     format!(
                         "{}{}",
-                        scheme.name,
+                        sanitized_scheme_name,
                         if scheme.is_inherently_nullable {
                             "NonNull"
                         } else {
@@ -75,17 +76,17 @@ class BEAM{}Model implements BEAMSerde {{
     toJson() => value?.toJson();
 }}
                         ",
-                    scheme.name,
-                    scheme.name,
-                    scheme.name,
-                    scheme.name,
-                    scheme.name,
-                    scheme.name,
-                    scheme.name,
+                    sanitized_scheme_name,
+                    sanitized_scheme_name,
+                    sanitized_scheme_name,
+                    sanitized_scheme_name,
+                    sanitized_scheme_name,
+                    sanitized_scheme_name,
+                    sanitized_scheme_name,
                 );
             }
             let file = File {
-                path: std::path::PathBuf::from(format!("{}.dart", scheme.name)),
+                path: std::path::PathBuf::from(format!("{}.dart", sanitized_scheme_name)),
                 content,
             };
             scheme_files.push(file);
@@ -110,7 +111,12 @@ class BEAM{}Model implements BEAMSerde {{
     }
 
     pub(super) fn class_name(&self, name: &str) -> String {
-        format!("{}{}{}", self.class_prefix, name, self.class_suffix)
+        format!(
+            "{}{}{}",
+            self.class_prefix,
+            sanitize(name),
+            self.class_suffix
+        )
     }
 
     // return (content, files, not_built, nullable, optional)
@@ -157,7 +163,7 @@ class BEAM{}Model implements BEAMSerde {{
             }
             intermediate::IAST::Reference(annotated_ref) => {
                 let link = annotated_ref.path;
-                let trimmed_link = link.replace("#/components/schemas/", "");
+                let trimmed_link = sanitize(&link.replace("#/components/schemas/", ""));
                 (
                     format!(
                         "export '{}schemes/{}.dart';\nimport '{}schemes/{}.dart';\n",
@@ -335,7 +341,8 @@ class BEAM{}Model implements BEAMSerde {{
         let mut variants = Vec::new();
 
         for (union_inner_name, iast) in sum.iter() {
-            let mut variant_name = index_to_name(union_inner_name);
+            let sanitized_inner_name = sanitize(union_inner_name);
+            let mut variant_name = index_to_name(&sanitized_inner_name);
             let (content, depends_on_files, not_built, nullable, optional, is_binary) =
                 self.parse_named_iast(&variant_name, iast, depth + 1);
             if let Some(GenerationSpecialCase {
@@ -346,7 +353,7 @@ class BEAM{}Model implements BEAMSerde {{
                 variant_name = index_to_name(&internal_type_name);
             }
             file_dependencies.push(File {
-                path: std::path::PathBuf::from(format!("{}/{}.dart", name, union_inner_name)),
+                path: std::path::PathBuf::from(format!("{}/{}.dart", name, sanitized_inner_name)),
                 content,
             });
             variants.push((self.class_name(&variant_name), not_built, nullable));
@@ -494,7 +501,7 @@ class BEAM{}Model implements BEAMSerde {{
         let mut variants: Vec<(String, &str, String)> = Vec::new();
 
         for (discriminator_value, annotated_ref) in discrimination.map.iter() {
-            let trimmed_link = annotated_ref.path.replace("#/components/schemas/", "");
+            let trimmed_link = sanitize(&annotated_ref.path.replace("#/components/schemas/", ""));
             let variant_class_name = self.class_name(&format!("{}{}", name, trimmed_link));
             let referenced_type_name = self.class_name(&trimmed_link);
             variants.push((variant_class_name, discriminator_value, referenced_type_name));
@@ -599,7 +606,7 @@ class BEAM{}Model implements BEAMSerde {{
         // (allowed_value, is_string, description)
         allowed_values: &Vec<(&str, bool, &str)>,
     ) -> (String, String) {
-        let class_name = format!("{}{}", self.class_prefix, name);
+        let class_name = format!("{}{}", self.class_prefix, sanitize(name));
         // (sanitized_value, enum_value, is_string, description)
         let allowed_values_str = allowed_values
             .iter()
@@ -681,10 +688,11 @@ class BEAM{}Model implements BEAMSerde {{
             props
         };
         for (p_name, iast) in sorted_props.iter() {
+            let sanitized_p_name = sanitize(p_name);
             if let intermediate::IAST::Primitive(prim) = &iast {
                 let (prim_type, prim_data) = match &prim.value {
                     intermediate::types::Primitive::Enum(allowed_values) => {
-                        let full_name = format!("{}_{}", name, p_name);
+                        let full_name = format!("{}_{}", name, sanitized_p_name);
                         let (class_name, content) = self.generate_primitive_sum_type(
                             &full_name,
                             doc_str,
@@ -697,7 +705,7 @@ class BEAM{}Model implements BEAMSerde {{
                         (class_name, PropertyType::Normal)
                     }
                     intermediate::types::Primitive::List(inner_iast) => {
-                        let mut full_name = &format!("{}_{}", name, p_name);
+                        let mut full_name = &format!("{}_{}", name, sanitized_p_name);
                         let (
                             content,
                             depends_on_files,
@@ -717,7 +725,10 @@ class BEAM{}Model implements BEAMSerde {{
                         }
 
                         file_dependencies.push(File {
-                            path: std::path::PathBuf::from(format!("{}/{}.dart", name, p_name)),
+                            path: std::path::PathBuf::from(format!(
+                                "{}/{}.dart",
+                                name, sanitized_p_name
+                            )),
                             content,
                         });
                         for f in depends_on_files.into_iter() {
@@ -741,11 +752,14 @@ class BEAM{}Model implements BEAMSerde {{
                         )
                     }
                     intermediate::types::Primitive::Map(inner_iast) => {
-                        let full_name = format!("{}_{}", name, p_name);
+                        let full_name = format!("{}_{}", name, sanitized_p_name);
                         let (content, depends_on_files, _, _nullable, _optional, _is_binary) =
                             self.parse_named_iast(&full_name, inner_iast, depth + 1);
                         file_dependencies.push(File {
-                            path: std::path::PathBuf::from(format!("{}/{}.dart", name, p_name)),
+                            path: std::path::PathBuf::from(format!(
+                                "{}/{}.dart",
+                                name, sanitized_p_name
+                            )),
                             content,
                         });
                         for f in depends_on_files.into_iter() {
@@ -775,7 +789,7 @@ class BEAM{}Model implements BEAMSerde {{
                 });
                 continue;
             }
-            let full_name = format!("{}_{}", name, p_name);
+            let full_name = format!("{}_{}", name, sanitized_p_name);
             let mut type_name = self.class_name(&full_name);
             let (content, depends_on_files, special_case, nullable, optional, _is_binary) =
                 self.parse_named_iast(&full_name, iast, depth + 1);
@@ -800,7 +814,7 @@ class BEAM{}Model implements BEAMSerde {{
                 prop_type: PropertyType::Normal,
             });
             file_dependencies.push(File {
-                path: std::path::PathBuf::from(format!("{}/{}.dart", name, p_name)),
+                path: std::path::PathBuf::from(format!("{}/{}.dart", name, sanitized_p_name)),
                 content,
             });
             for f in depends_on_files.into_iter() {
