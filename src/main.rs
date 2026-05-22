@@ -8,11 +8,11 @@ enum DestinationLanguage {
 }
 
 impl Generator for DestinationLanguage {
-    async fn generate(&self, spec: &oas3::Spec) -> Result<Vec<File>, String> {
+    async fn generate(&self, spec: &oas3::Spec, args: GenerationArgs) -> Result<Vec<File>, String> {
         let generator = match self {
             DestinationLanguage::Dart => DartGenerator,
         };
-        generator.generate(spec).await
+        generator.generate(spec, args).await
     }
 }
 
@@ -53,11 +53,12 @@ async fn fetch_spec_json(url: &str) -> Result<String, reqwest::Error> {
 async fn main() {
 
     // parse args from the following format
-    // --spec-url/-u <spec-url> --out-dir/-o <out-dir> --destination-language/-d <destination-language> 
+    // --spec-url/-u <spec-url> --out-dir/-o <out-dir> --destination-language/-d <destination-language>
     let mut args = std::env::args().skip(1);
     let mut spec_url = None;
     let mut out_dir = None;
     let mut destination_language = None;
+    let mut skip_deprecated_removal = false;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -72,6 +73,9 @@ async fn main() {
                     "dart" => DestinationLanguage::Dart,
                     _ => panic!("Unsupported destination language")
                 });
+            }
+            "--skip-deprecated-removal" => {
+                skip_deprecated_removal = true;
             }
             _ => panic!("Unknown argument: {}", arg)
         }
@@ -102,7 +106,7 @@ async fn main() {
         }
     };
     println!("generating {:} code", destination_language);
-    let files = match destination_language.generate(&spec).await {
+    let files = match destination_language.generate(&spec, GenerationArgs {ignore_deprecated_fields: !skip_deprecated_removal} ).await {
         Ok(files) => files,
         Err(e) => {
             println!("generating code error: {:?}", e);

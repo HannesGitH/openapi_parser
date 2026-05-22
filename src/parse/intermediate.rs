@@ -7,13 +7,19 @@ pub use types::*;
 #[macro_use]
 mod macros;
 
+#[derive(Debug, Clone)]
+pub struct IntermediateArgs {
+    pub ignore_deprecated_fields: bool,
+}
+
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     NoComponents,
     ParseError(String),
 }
 
-pub fn parse(spec: &oas3::Spec) -> Result<IntermediateFormat, Error> {
+pub fn parse(spec: &oas3::Spec, args: IntermediateArgs) -> Result<IntermediateFormat, Error> {
     let mut schemes = Vec::new();
     let components = match &spec.components {
         Some(components) => components,
