@@ -1,5 +1,5 @@
 pub mod types;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use oas3::spec::Response as Responses;
 use oas3::spec::*;
@@ -12,6 +12,34 @@ pub struct IntermediateArgs {
     pub ignore_deprecated_fields: bool,
 }
 
+/// Context carried through the entire intermediate parse. Holds the user args
+/// plus a precomputed set of top-level scheme names that are marked
+/// `deprecated: true` in `components.schemas`, so we can cheaply decide whether
+/// a `$ref` points at a deprecated scheme.
+pub struct ParseCtx<'a> {
+    pub args: IntermediateArgs,
+    pub deprecated_schemes: HashSet<&'a str>,
+}
+
+fn strip_ref_prefix(p: &str) -> &str {
+    p.strip_prefix("#/components/schemas/").unwrap_or(p)
+}
+
+impl<'a> ParseCtx<'a> {
+    fn ref_targets_deprecated(&self, ref_path: &str) -> bool {
+        self.deprecated_schemes.contains(strip_ref_prefix(ref_path))
+    }
+}
+
+/// Uniform deprecation check across the three IAST shapes. Used by the
+/// property/parameter filters when `ignore_deprecated_fields` is on.
+fn iast_is_deprecated(iast: &IAST) -> bool {
+    match iast {
+        IAST::Object(o) => o.is_deprecated,
+        IAST::Primitive(p) => p.is_deprecated,
+        IAST::Reference(r) => r.is_deprecated,
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
@@ -25,8 +53,24 @@ pub fn parse(spec: &oas3::Spec, args: IntermediateArgs) -> Result<IntermediateFo
         Some(components) => components,
         None => return Err(Error::NoComponents),
     };
+
+    // Precompute which top-level schemes are deprecated. We KEEP deprecated
+    // schemes in the output (option A) so that sum-type variants and ref
+    // passthroughs still resolve; the set is only used to decide whether a
+    // property/parameter referencing such a scheme should be dropped.
+    let deprecated_schemes: HashSet<&str> = components
+        .schemas
+        .iter()
+        .filter_map(|(name, schema)| match schema {
+            ObjectOrReference::Object(obj) if obj.deprecated == Some(true) => Some(name.as_str()),
+            _ => None,
+        })
+        .collect();
+
+    let ctx = ParseCtx { args, deprecated_schemes };
+
     for (name, schema) in components.schemas.iter() {
-        let obj = match parse_schema(schema, false, false) {
+        let obj = match parse_schema(&ctx, schema, false, false) {
             Ok(obj) => obj,
             Err(e) => return Err(e),
         };
@@ -52,6 +96,7 @@ pub fn parse(spec: &oas3::Spec, args: IntermediateArgs) -> Result<IntermediateFo
                         let mut endpoints = Vec::new();
 
                         let parser = macros::EndpointParser {
+                            ctx: &ctx,
                             params_parser: &parse_params,
                             request_parser: &parse_request,
                             responses_parser: &parse_responses,
@@ -81,27 +126,43 @@ pub fn parse(spec: &oas3::Spec, args: IntermediateArgs) -> Result<IntermediateFo
     Ok(IntermediateFormat::new(schemes, routes, routes_tree))
 }
 
-fn parse_params(params: &Vec<ObjectOrReference<Parameter>>) -> Result<Vec<Param>, Error> {
+fn parse_params<'a>(
+    ctx: &ParseCtx<'a>,
+    params: &'a Vec<ObjectOrReference<Parameter>>,
+) -> Result<Vec<Param<'a>>, Error> {
     params
         .iter()
         .map(|param| match param {
-            ObjectOrReference::Object(Parameter {
-                name,
-                location,
-                description,
-                required,
-                ..
-            }) => {
+            ObjectOrReference::Object(p) => {
+                let Parameter {
+                    name,
+                    location,
+                    description,
+                    required,
+                    deprecated,
+                    schema,
+                    ..
+                } = p;
                 if location == &ParameterIn::Path {
-                    None
-                } else {
-                    // println!("param: {}, required: {}", name, required.unwrap_or(false));
-                    Some(Ok(Param {
-                        name: name.as_str(),
-                        description: description.as_deref(),
-                        required: required.unwrap_or(false),
-                    }))
+                    return None;
                 }
+                if ctx.args.ignore_deprecated_fields {
+                    // skip params explicitly marked deprecated
+                    if deprecated.unwrap_or(false) {
+                        return None;
+                    }
+                    // skip params whose schema is a $ref to a deprecated scheme
+                    if let Some(ObjectOrReference::Ref { ref_path }) = schema {
+                        if ctx.ref_targets_deprecated(ref_path) {
+                            return None;
+                        }
+                    }
+                }
+                Some(Ok(Param {
+                    name: name.as_str(),
+                    description: description.as_deref(),
+                    required: required.unwrap_or(false),
+                }))
             }
             ObjectOrReference::Ref { ref_path, .. } => Some(Err(Error::ParseError(format!(
                 "Reference to {} not supported in params",
@@ -112,7 +173,10 @@ fn parse_params(params: &Vec<ObjectOrReference<Parameter>>) -> Result<Vec<Param>
         .collect()
 }
 
-fn parse_request(request: Option<&ObjectOrReference<RequestBody>>) -> Result<IAST, Error> {
+fn parse_request<'a>(
+    ctx: &ParseCtx<'a>,
+    request: Option<&'a ObjectOrReference<RequestBody>>,
+) -> Result<IAST<'a>, Error> {
     match request {
         Some(ObjectOrReference::Object(req_body)) => {
             //we only consider a single possible format (like application/json) for now
@@ -125,17 +189,19 @@ fn parse_request(request: Option<&ObjectOrReference<RequestBody>>) -> Result<IAS
                 .schema
                 .as_ref()
                 .unwrap();
-            parse_schema(scheme, false, false)
+            parse_schema(ctx, scheme, false, false)
         }
         Some(ObjectOrReference::Ref { ref_path, .. }) => Ok(IAST::Reference(AnnotatedReference {
             path: ref_path,
             optional: false,
             nullable: false,
+            is_deprecated: ctx.ref_targets_deprecated(ref_path),
         })),
         None => Err(Error::ParseError("No request body".to_string())),
     }
 }
 fn parse_responses<'a>(
+    ctx: &ParseCtx<'a>,
     responses: &'a BTreeMap<String, ObjectOrReference<Responses>>,
 ) -> Result<BTreeMap<&'a String, IAST<'a>>, Error> {
     let mut map = BTreeMap::new();
@@ -149,7 +215,7 @@ fn parse_responses<'a>(
                     None => return Err(Error::ParseError("No response body".to_string())),
                 };
                 if let Some(schema) = scheme {
-                    let schema = parse_schema(&schema, false, false).unwrap();
+                    let schema = parse_schema(ctx, &schema, false, false).unwrap();
                     map.insert(code, schema);
                 }
             }
@@ -158,6 +224,7 @@ fn parse_responses<'a>(
                     path: ref_path,
                     optional: false,
                     nullable: false,
+                    is_deprecated: ctx.ref_targets_deprecated(ref_path),
                 });
                 map.insert(code, schema);
             }
@@ -166,23 +233,29 @@ fn parse_responses<'a>(
     Ok(map)
 }
 
-fn parse_schema(
-    schema: &ObjectOrReference<ObjectSchema>,
+fn parse_schema<'a>(
+    ctx: &ParseCtx<'a>,
+    schema: &'a ObjectOrReference<ObjectSchema>,
     is_optional: bool,
     // only used in rare edge case where we have an object that is only a ref but can also be null
     ref_is_nullable: bool,
-) -> Result<IAST, Error> {
+) -> Result<IAST<'a>, Error> {
     match schema {
-        ObjectOrReference::Object(object) => parse_object(object, is_optional),
+        ObjectOrReference::Object(object) => parse_object(ctx, object, is_optional),
         ObjectOrReference::Ref { ref_path } => Ok(IAST::Reference(AnnotatedReference {
             path: ref_path,
             optional: is_optional,
             nullable: ref_is_nullable,
+            is_deprecated: ctx.ref_targets_deprecated(ref_path),
         })),
     }
 }
 
-fn parse_object(object: &ObjectSchema, is_optional: bool) -> Result<IAST, Error> {
+fn parse_object<'a>(
+    ctx: &ParseCtx<'a>,
+    object: &'a ObjectSchema,
+    is_optional: bool,
+) -> Result<IAST<'a>, Error> {
     if object.format == Some("binary".to_string()) {
         return Ok(IAST::Primitive(AnnotatedObj {
             nullable: false,
@@ -206,7 +279,7 @@ fn parse_object(object: &ObjectSchema, is_optional: bool) -> Result<IAST, Error>
                 match object
                     .properties
                     .iter()
-                    .map(|(name, schema)| {
+                    .filter_map(|(name, schema)| {
                         let is_required =
                             object.required.iter().any(|n| n.as_str() == name.as_str());
                         // println!("parsing property: {}, nullable: {}", name, !is_required);
@@ -216,9 +289,18 @@ fn parse_object(object: &ObjectSchema, is_optional: bool) -> Result<IAST, Error>
                         }
 
                         //TODO: there was a case where a required object could either be an object or null, but the oas3 spec properties where empty although the json had some, idk
-                        match parse_schema(schema, !is_required, false) {
-                            Ok(obj) => Ok((name.as_str(), obj)),
-                            Err(e) => Err(e),
+                        match parse_schema(ctx, schema, !is_required, false) {
+                            Ok(obj) => {
+                                // Drop properties that are deprecated (either inline, or a $ref
+                                // pointing at a deprecated scheme). Piggy-backs on `is_deprecated`
+                                // which is set uniformly across IAST variants by parse_schema.
+                                if ctx.args.ignore_deprecated_fields && iast_is_deprecated(&obj) {
+                                    None
+                                } else {
+                                    Some(Ok((name.as_str(), obj)))
+                                }
+                            }
+                            Err(e) => Some(Err(e)),
                         }
                     })
                     .collect::<Result<HashMap<_, _>, _>>()
@@ -269,7 +351,7 @@ fn parse_object(object: &ObjectSchema, is_optional: bool) -> Result<IAST, Error>
                 }
             },
             SchemaType::Array => match &object.items {
-                Some(items) => match parse_schema(&items, false, false) {
+                Some(items) => match parse_schema(ctx, &items, false, false) {
                     Ok(obj) => Primitive::List(Box::new(obj)),
                     Err(e) => {
                         println!("error parsing list: {:?}", e);
@@ -337,6 +419,9 @@ fn parse_object(object: &ObjectSchema, is_optional: bool) -> Result<IAST, Error>
                                 path: v.as_str(),
                                 optional: false,
                                 nullable: false,
+                                // sum-type variants are KEPT even if deprecated, but we still
+                                // surface the flag so codegen can annotate them appropriately
+                                is_deprecated: ctx.ref_targets_deprecated(v.as_str()),
                             },
                         )
                     })
@@ -365,7 +450,7 @@ fn parse_object(object: &ObjectSchema, is_optional: bool) -> Result<IAST, Error>
                 .iter()
                 .enumerate()
                 .map(
-                    |(idx, schema)| match parse_schema(schema, false, nullable) {
+                    |(idx, schema)| match parse_schema(ctx, schema, false, nullable) {
                         Ok(obj) => Ok((
                             match &obj {
                                 IAST::Reference(refe) => {
@@ -412,6 +497,7 @@ fn parse_object(object: &ObjectSchema, is_optional: bool) -> Result<IAST, Error>
                     path: ref_path,
                     optional: is_optional,
                     nullable: true,
+                    is_deprecated: ctx.ref_targets_deprecated(ref_path),
                 }));
             }
         }

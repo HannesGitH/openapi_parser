@@ -102,6 +102,7 @@ pub struct AnnotatedReference<'a> {
     pub path: &'a str,
     pub optional: bool,
     pub nullable: bool,
+    pub is_deprecated: bool,
 }
 
 /// Intermediate Abstract Syntax Tree
