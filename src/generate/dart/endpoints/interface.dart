@@ -139,14 +139,16 @@ class BEAMCachedResponse<T> {
     required Future<T>? cachedFuture,
   }) : _upstreamFuture = upstreamFuture,
        _cachedFuture = cachedFuture,
-       _streamController =
-           StreamController<T>() {
+       _streamController = StreamController<T>() {
     _cachedFuture?.then(
       (value) {
+        // A cache "miss" (no entry yet) is the default state, not an error.
+        // Only emit if we actually got a cached value.
+        if (value == null) return;
         _streamController.add(value);
       },
       onError: (error, stackTrace) {
-        // cache-miss is not really an error
+        // Real cache errors (corrupt data, IO failure) still surface here.
         _streamController.addError(BeamCacheError(error), stackTrace);
       },
     );
@@ -172,12 +174,32 @@ class BEAMCachedResponse<T> {
   final Future<T>? _cachedFuture;
   final StreamController<T> _streamController;
 
-  Future<T> get first => FutureHelper.anySuccess<T>(
-    // todo: update with null-aware-elements
-    _cachedFuture != null
-        ? [_upstreamFuture, _cachedFuture]
-        : [_upstreamFuture],
-  );
+  Future<T> get first {
+    // No cache leg at all? Just mirror upstream directly so callers see the
+    // real upstream error (not an AnySuccessError wrapper) on failure.
+    if (_cachedFuture == null) return _upstreamFuture;
+    final completer = Completer<T>.sync();
+    _cachedFuture.then(
+      (value) {
+        if (!completer.isCompleted) completer.complete(value);
+      },
+      // A cache failure is NOT a failure of `first` -- the whole point of
+      // caching is graceful degradation. Just wait for upstream.
+      onError: (_, __) {},
+    );
+    _upstreamFuture.then(
+      (value) {
+        if (!completer.isCompleted) completer.complete(value);
+      },
+      // Upstream failing IS a failure of `first`. Surface the real error
+      // directly so typed `catch` clauses at the call site still work, rather
+      // than wrapping it in AnySuccessError.
+      onError: (error, stackTrace) {
+        if (!completer.isCompleted) completer.completeError(error, stackTrace);
+      },
+    );
+    return completer.future;
+  }
 
   Future<T> get actual => _upstreamFuture;
 
