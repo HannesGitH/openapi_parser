@@ -26,8 +26,8 @@ macro_rules! handle_endpoint {
     ($parser:expr, $endpoints:expr, $route_part:expr, $method:expr) => {{
         if let Some(endpoint) = $route_part {
             // Skip whole operations marked deprecated when the flag is on.
-            let skip_deprecated = $parser.ctx.args.ignore_deprecated_fields
-                && endpoint.deprecated.unwrap_or(false);
+            let skip_deprecated =
+                $parser.ctx.args.ignore_deprecated_fields && endpoint.deprecated.unwrap_or(false);
             if !skip_deprecated {
                 $endpoints.push(Endpoint {
                     method: $method,

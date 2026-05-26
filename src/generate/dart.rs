@@ -2,22 +2,32 @@ pub struct DartGenerator;
 
 use std::thread;
 
-use crate::{generate::GenerationArgs, parse::intermediate::{self, IntermediateArgs}};
+use crate::{
+    generate::GenerationArgs,
+    parse::intermediate::{self, IntermediateArgs},
+};
 
 mod endpoints;
 mod schemes;
 mod serde;
 
 impl super::Generator for DartGenerator {
-    async fn generate(&self, spec: &oas3::Spec, args: GenerationArgs) -> Result<Vec<super::File>, String> {
+    async fn generate(
+        &self,
+        spec: &oas3::Spec,
+        args: GenerationArgs,
+    ) -> Result<Vec<super::File>, String> {
         let class_prefix = "BEAM";
         let class_suffix = "Model";
         let mut out = Vec::new();
         serde::add_serde_utils(&mut out);
         println!("parsing spec to intermediate");
-        let intermediate = match intermediate::parse(&spec, IntermediateArgs {
-            ignore_deprecated_fields: args.ignore_deprecated_fields,
-        }) {
+        let intermediate = match intermediate::parse(
+            &spec,
+            IntermediateArgs {
+                ignore_deprecated_fields: args.ignore_deprecated_fields,
+            },
+        ) {
             Ok(intermediate) => intermediate,
             Err(e) => {
                 println!("parsing spec to intermediate error: {:?}", e);
