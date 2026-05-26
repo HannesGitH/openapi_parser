@@ -1,6 +1,8 @@
 use crate::{
     generate::{
-        dart::schemes::{create_property_name, sanitize, GenerationSpecialCaseType},
+        dart::schemes::{
+            create_property_name, sanitize, sanitize_identifier, GenerationSpecialCaseType,
+        },
         File,
     },
     parse::intermediate::{self, Route, RouteFragmentLeafData},
@@ -385,13 +387,16 @@ impl<'a> EndpointAdder<'a> {
                         match child {
                             intermediate::RouteFragment::Node(child_node) => {
                                 let child_frag_name = &child_node.path_fragment_name;
-                                let sanitized_child_frag_name = sanitize(child_frag_name);
+                                // The fragment name is also used as a Dart
+                                // method/getter name here, so it must be a
+                                // valid identifier (no leading digit).
+                                let child_getter_name = sanitize_identifier(child_frag_name);
                                 if child_node.is_param {
                                     cpf!(
                                         s,
                                         "\t{} {}(String param) => {}(parent: this, param: param, deps: this.deps);",
                                         child_class_name,
-                                        sanitized_child_frag_name,
+                                        child_getter_name,
                                         child_class_name
                                     );
                                 } else {
@@ -399,7 +404,7 @@ impl<'a> EndpointAdder<'a> {
                                         s,
                                         "\t{} get {} => {}(parent: this, deps: this.deps);",
                                         child_class_name,
-                                        sanitized_child_frag_name,
+                                        child_getter_name,
                                         child_class_name
                                     );
                                 };

@@ -61,7 +61,7 @@ impl<'a> SchemeAdder<'a> {
                 // lol irgendwann sollte man mal auf ne templating engine umsteigen
                 cpf!(
                     content,
-                    "        
+                    "
 class BEAM{}Model implements BEAMSerde {{
 
     BEAM{}Model(this.value);
@@ -146,8 +146,12 @@ class BEAM{}Model implements BEAMSerde {{
                         (content, files, None, nullable, optional, false)
                     }
                     AlgType::DiscriminatedSum(discrimination) => {
-                        let (content, files) =
-                            self.generate_discriminated_sum_type(name, &doc_str, discrimination, depth);
+                        let (content, files) = self.generate_discriminated_sum_type(
+                            name,
+                            &doc_str,
+                            discrimination,
+                            depth,
+                        );
                         let nullable = annotated_obj.nullable;
                         let optional = annotated_obj.optional;
                         (content, files, None, nullable, optional, false)
@@ -504,7 +508,11 @@ class BEAM{}Model implements BEAMSerde {{
             let trimmed_link = sanitize(&annotated_ref.path.replace("#/components/schemas/", ""));
             let variant_class_name = self.class_name(&format!("{}{}", name, trimmed_link));
             let referenced_type_name = self.class_name(&trimmed_link);
-            variants.push((variant_class_name, discriminator_value, referenced_type_name));
+            variants.push((
+                variant_class_name,
+                discriminator_value,
+                referenced_type_name,
+            ));
         }
 
         let mut content = String::new();
@@ -570,7 +578,10 @@ class BEAM{}Model implements BEAMSerde {{
 
         // Generate variant classes
         for (variant_class_name, _, referenced_type_name) in variants.iter() {
-            content.push_str(&format!("class {}_ extends {} {{\n", variant_class_name, class_name));
+            content.push_str(&format!(
+                "class {}_ extends {} {{\n",
+                variant_class_name, class_name
+            ));
             content.push_str(&format!(
                 "  {}{} value;\n",
                 if self.vars_should_be_final {
@@ -987,16 +998,49 @@ fn mk_doc_str<T>(name: &str, annotated_obj: &intermediate::AnnotatedObj<T>, tabs
 }
 
 pub fn sanitize(name: &str) -> String {
-    let sanitized = name
-        .chars()
+    name.chars()
         .map(|c| if c.is_alphanumeric() { c } else { '_' })
-        .collect::<String>();
+        .collect()
+}
 
+/// Returns the English word for `c` if it is an ASCII digit.
+fn digit_to_word(c: char) -> Option<&'static str> {
+    match c {
+        '0' => Some("zero"),
+        '1' => Some("one"),
+        '2' => Some("two"),
+        '3' => Some("three"),
+        '4' => Some("four"),
+        '5' => Some("five"),
+        '6' => Some("six"),
+        '7' => Some("seven"),
+        '8' => Some("eight"),
+        '9' => Some("nine"),
+        _ => None,
+    }
+}
+
+/// Like [`sanitize`], but additionally ensures the result is a valid Dart
+/// identifier on its own by replacing a leading ASCII digit with its written
+/// variant (e.g. `3` -> `three`, `3d` -> `three_d`, `404Error` ->
+/// `four04Error`). Use this whenever the produced string stands alone as a
+/// Dart identifier (field, getter, method name); plain [`sanitize`] is fine
+/// for fragments that are concatenated with a non-digit prefix.
+pub fn sanitize_identifier(name: &str) -> String {
+    let sanitized = sanitize(name);
+    if let Some(word) = sanitized.chars().next().and_then(digit_to_word) {
+        let rest = &sanitized[1..];
+        return if rest.is_empty() {
+            word.to_string()
+        } else {
+            format!("{}_{}", word, rest)
+        };
+    }
     sanitized
 }
 
 pub fn create_property_name(name: &str) -> String {
-    let sanitized = sanitize(name);
+    let sanitized = sanitize_identifier(name);
     if sanitized.starts_with('_') {
         format!("$private{}", sanitized)
     } else {
