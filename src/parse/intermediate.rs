@@ -21,12 +21,10 @@ pub struct ParseCtx<'a> {
     pub deprecated_schemes: HashSet<&'a str>,
 }
 
-fn strip_ref_prefix(p: &str) -> &str {
-    p.strip_prefix("#/components/schemas/").unwrap_or(p)
-}
-
 impl<'a> ParseCtx<'a> {
     fn ref_targets_deprecated(&self, ref_path: &str) -> bool {
+        // `strip_ref_prefix` is the single shared helper, defined in
+        // `types.rs` and re-exported via `pub use types::*;` above.
         self.deprecated_schemes.contains(strip_ref_prefix(ref_path))
     }
 }
@@ -67,7 +65,10 @@ pub fn parse(spec: &oas3::Spec, args: IntermediateArgs) -> Result<IntermediateFo
         })
         .collect();
 
-    let ctx = ParseCtx { args, deprecated_schemes };
+    let ctx = ParseCtx {
+        args,
+        deprecated_schemes,
+    };
 
     for (name, schema) in components.schemas.iter() {
         let obj = match parse_schema(&ctx, schema, false, false) {
@@ -453,9 +454,7 @@ fn parse_object<'a>(
                     |(idx, schema)| match parse_schema(ctx, schema, false, nullable) {
                         Ok(obj) => Ok((
                             match &obj {
-                                IAST::Reference(refe) => {
-                                    refe.path.replace("#/components/schemas/", "")
-                                }
+                                IAST::Reference(refe) => strip_ref_prefix(refe.path).to_string(),
                                 _ => idx.to_string(),
                             },
                             obj,

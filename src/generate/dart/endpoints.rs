@@ -158,11 +158,20 @@ impl<'a> EndpointAdder<'a> {
                         Some(schemes::GenerationSpecialCase { reason, type_name }) => {
                             (
                                 type_name,
-                                match reason {
-                                    GenerationSpecialCaseType::List(_, is_primitive) => true,
+                                match &reason {
+                                    GenerationSpecialCaseType::List(_, is_primitive) => {
+                                        *is_primitive
+                                    }
                                     GenerationSpecialCaseType::Primitive => true,
-                                    //TODO: might also be a primitive link
-                                    GenerationSpecialCaseType::Link(_) => false,
+                                    // A link can point at a primitive
+                                    // typedef (e.g. `typedef Foo = String;`);
+                                    // in that case the body has no
+                                    // `.toJson()` and must be passed as raw
+                                    // JSON. Defer to the shared resolver so
+                                    // chains of refs are followed too.
+                                    GenerationSpecialCaseType::Link(link) => {
+                                        self.intermediate.resolve_ref(link).is_primitive()
+                                    }
                                 },
                                 match reason {
                                     GenerationSpecialCaseType::List(inner_type, _) => {
@@ -224,36 +233,29 @@ impl<'a> EndpointAdder<'a> {
                         match special_case {
                             Some(schemes::GenerationSpecialCase { reason, type_name }) => (
                                 type_name,
-                                reason == GenerationSpecialCaseType::Primitive
-                                    || {
-                                        // assozialer edge case wo wir gelinkt haben aber auf einen primitive type
-                                        // TODO: do this in a better (not just-one-edge-case-fix kinda) way
-                                        if let GenerationSpecialCaseType::Link(link) = &reason {
-                                            use crate::parse::intermediate::types::*;
-                                            if let Some(Scheme {
-                                                obj: IAST::Primitive(_),
-                                                ..
-                                            }) = self
-                                                .intermediate
-                                                .schemes
-                                                .iter()
-                                                .find(|s| s.name == link)
-                                            {
-                                                true
-                                            } else {
-                                                false
-                                            }
-                                        } else {
-                                            false
-                                        }
-                                    }
-                                    || if let GenerationSpecialCaseType::List(_, is_primitive) =
-                                        &reason
-                                    {
+                                // Is the response value a raw primitive
+                                // (no `.fromJson`) rather than a generated
+                                // class? Three sub-cases:
+                                //  - the IAST itself was primitive,
+                                //  - it was a list whose elements were
+                                //    flagged primitive,
+                                //  - it was a link (`$ref`) whose target
+                                //    transitively resolves to a primitive
+                                //    typedef (e.g. `typedef Foo = String;`).
+                                // The link case used to be a one-shot
+                                // open-coded `iter().find` only one hop
+                                // deep; it now goes through the shared
+                                // resolver which follows ref chains and
+                                // correctly classifies enums as non-primitive.
+                                match &reason {
+                                    GenerationSpecialCaseType::Primitive => true,
+                                    GenerationSpecialCaseType::List(_, is_primitive) => {
                                         *is_primitive
-                                    } else {
-                                        false
-                                    },
+                                    }
+                                    GenerationSpecialCaseType::Link(link) => {
+                                        self.intermediate.resolve_ref(link).is_primitive()
+                                    }
+                                },
                                 if let GenerationSpecialCaseType::List(inner_type, _) = reason {
                                     Some(inner_type)
                                 } else {

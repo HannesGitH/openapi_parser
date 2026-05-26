@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::super::interface::*;
 
-use crate::parse::intermediate::{AlgType, AnnotatedObj, Primitive};
+use crate::parse::intermediate::{strip_ref_prefix, AlgType, AnnotatedObj, Primitive};
 #[allow(unused_imports)]
 use crate::{cpf, parse::intermediate};
 
@@ -37,43 +37,18 @@ impl<'a> SchemeAdder<'a> {
         self.complete_iast = Some(intermediate);
     }
 
-    /// Returns `true` if the given IAST ultimately resolves to a Dart
-    /// primitive value type (e.g. `String`, `int`, `num`, `bool`,
-    /// `Uint8List`, `dynamic`) once `Reference`s to typedef'd schemes are
-    /// followed transitively.
+    /// Thin wrapper that asks the shared
+    /// [`IntermediateFormat::resolve_iast`] classifier whether the given
+    /// IAST resolves (after transitively following `Reference`s) to a
+    /// raw Dart primitive without `.toJson()` / `.fromJson()`.
     ///
-    /// This is used to decide whether the generated Dart code should call
-    /// `.toJson()` / `.fromJson()` on a value (which is only valid for
-    /// generated classes/enums), or treat it as a raw JSON-compatible value.
-    ///
-    /// `Enum` primitives are intentionally *not* considered primitive here,
-    /// because the generator emits a real Dart class with `.fromJson` for
-    /// every enum.
+    /// `Enum` primitives are intentionally NOT counted as primitive
+    /// because the generator emits a real Dart enum class with
+    /// `.fromJson` for them.
     fn iast_resolves_to_primitive(&self, iast: &intermediate::IAST<'a>) -> bool {
-        let mut current = iast;
-        let mut visited: std::collections::HashSet<&str> = std::collections::HashSet::new();
-        loop {
-            match current {
-                intermediate::IAST::Primitive(prim) => {
-                    return !matches!(prim.value, Primitive::Enum(_));
-                }
-                intermediate::IAST::Object(_) => return false,
-                intermediate::IAST::Reference(annotated_ref) => {
-                    let path = annotated_ref.path;
-                    let name = path.strip_prefix("#/components/schemas/").unwrap_or(path);
-                    if !visited.insert(name) {
-                        // cycle in the schema; bail out conservatively.
-                        return false;
-                    }
-                    let Some(scheme) = self
-                        .complete_iast
-                        .and_then(|i| i.schemes.iter().find(|s| s.name == name))
-                    else {
-                        return false;
-                    };
-                    current = &scheme.obj;
-                }
-            }
+        match self.complete_iast {
+            Some(iformat) => iformat.resolve_iast(iast).is_primitive(),
+            None => false,
         }
     }
 
@@ -207,7 +182,7 @@ class BEAM{}Model implements BEAMSerde {{
             }
             intermediate::IAST::Reference(annotated_ref) => {
                 let link = annotated_ref.path;
-                let trimmed_link = sanitize(&link.replace("#/components/schemas/", ""));
+                let trimmed_link = sanitize(strip_ref_prefix(link));
                 (
                     format!(
                         "export '{}schemes/{}.dart';\nimport '{}schemes/{}.dart';\n",
@@ -545,7 +520,7 @@ class BEAM{}Model implements BEAMSerde {{
         let mut variants: Vec<(String, &str, String)> = Vec::new();
 
         for (discriminator_value, annotated_ref) in discrimination.map.iter() {
-            let trimmed_link = sanitize(&annotated_ref.path.replace("#/components/schemas/", ""));
+            let trimmed_link = sanitize(strip_ref_prefix(annotated_ref.path));
             let variant_class_name = self.class_name(&format!("{}{}", name, trimmed_link));
             let referenced_type_name = self.class_name(&trimmed_link);
             variants.push((
