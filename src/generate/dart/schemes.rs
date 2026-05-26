@@ -37,6 +37,46 @@ impl<'a> SchemeAdder<'a> {
         self.complete_iast = Some(intermediate);
     }
 
+    /// Returns `true` if the given IAST ultimately resolves to a Dart
+    /// primitive value type (e.g. `String`, `int`, `num`, `bool`,
+    /// `Uint8List`, `dynamic`) once `Reference`s to typedef'd schemes are
+    /// followed transitively.
+    ///
+    /// This is used to decide whether the generated Dart code should call
+    /// `.toJson()` / `.fromJson()` on a value (which is only valid for
+    /// generated classes/enums), or treat it as a raw JSON-compatible value.
+    ///
+    /// `Enum` primitives are intentionally *not* considered primitive here,
+    /// because the generator emits a real Dart class with `.fromJson` for
+    /// every enum.
+    fn iast_resolves_to_primitive(&self, iast: &intermediate::IAST<'a>) -> bool {
+        let mut current = iast;
+        let mut visited: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        loop {
+            match current {
+                intermediate::IAST::Primitive(prim) => {
+                    return !matches!(prim.value, Primitive::Enum(_));
+                }
+                intermediate::IAST::Object(_) => return false,
+                intermediate::IAST::Reference(annotated_ref) => {
+                    let path = annotated_ref.path;
+                    let name = path.strip_prefix("#/components/schemas/").unwrap_or(path);
+                    if !visited.insert(name) {
+                        // cycle in the schema; bail out conservatively.
+                        return false;
+                    }
+                    let Some(scheme) = self
+                        .complete_iast
+                        .and_then(|i| i.schemes.iter().find(|s| s.name == name))
+                    else {
+                        return false;
+                    };
+                    current = &scheme.obj;
+                }
+            }
+        }
+    }
+
     pub(super) fn add_schemes(&self, out: &mut Vec<File>) {
         let mut scheme_files = Vec::new();
         for scheme in self.complete_iast.unwrap().schemes.iter() {
@@ -750,13 +790,22 @@ class BEAM{}Model implements BEAMSerde {{
                             format!("{}<{}>", to_dart_prim(&prim.value), inner_class_name),
                             PropertyType::Primitive(PrimitivePropertyType::List {
                                 inner_type: inner_class_name,
-                                inner_is_primitive: match **inner_iast {
+                                inner_is_primitive: match &**inner_iast {
                                     // enums are not considered primitive in dart because e.g. they need to be parsed with .fromJson
                                     intermediate::IAST::Primitive(AnnotatedObj {
                                         value: Primitive::Enum(_),
                                         ..
                                     }) => false,
                                     intermediate::IAST::Primitive(_) => true,
+                                    // A reference may point at a scheme that is
+                                    // itself just a primitive typedef (e.g.
+                                    // `typedef BEAMCmsObjectIdParamModel = String;`).
+                                    // In that case the list elements have no
+                                    // `.toJson()` / `.fromJson()` and must be
+                                    // treated as primitives.
+                                    intermediate::IAST::Reference(_) => {
+                                        self.iast_resolves_to_primitive(inner_iast)
+                                    }
                                     _ => false,
                                 },
                             }),
@@ -816,13 +865,25 @@ class BEAM{}Model implements BEAMSerde {{
                 // e.g. List<BEAMSubscriptionModel>
                 type_name = self.class_name(internal_type_name.as_str());
             }
+            // A reference whose target scheme is a primitive typedef
+            // (e.g. `typedef BEAMCmsObjectIdParamModel = String;`) must not
+            // have `.toJson()` / `.fromJson()` called on it, because Dart
+            // built-in types like `String` don't expose those methods.
+            // Detect that case and fall through to the primitive code path.
+            let prop_type = if matches!(iast, intermediate::IAST::Reference(_))
+                && self.iast_resolves_to_primitive(iast)
+            {
+                PropertyType::Primitive(PrimitivePropertyType::Default)
+            } else {
+                PropertyType::Normal
+            };
             properties.push(Property {
                 name: p_name,
                 typ: type_name,
                 nullable: nullable || optional,
                 optional: optional,
                 doc_str: "".to_string(),
-                prop_type: PropertyType::Normal,
+                prop_type,
             });
             file_dependencies.push(File {
                 path: std::path::PathBuf::from(format!("{}/{}.dart", name, sanitized_p_name)),
