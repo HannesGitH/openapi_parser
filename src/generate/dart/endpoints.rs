@@ -154,6 +154,17 @@ impl<'a> EndpointAdder<'a> {
                     });
                     imports_str.push_str(&format!("import '{}';\n", &dep_path_str));
                     imports_str.push_str(&format!("export '{}';\n", &dep_path_str));
+                    // Classify the request body so the impl emission below
+                    // can pick the right "serialize before sending" form.
+                    // Three buckets:
+                    //   * primitive (no .toJson)  -> send `body` raw
+                    //   * single object/enum     -> send `body?.toJson()`
+                    //   * list of object/enum    -> send `body?.map((e) => e.toJson()).toList()`
+                    // For lists, we rely on the same `is_primitive` flag the
+                    // response side uses (set by `parse_named_iast` and now
+                    // chain-following via the shared `resolve_ref`), so
+                    // `List<Primitive>` and `List<$ref to primitive typedef>`
+                    // both bucket as primitive.
                     let body_type_str = match special_case {
                         Some(schemes::GenerationSpecialCase { reason, type_name }) => {
                             (
@@ -286,11 +297,23 @@ impl<'a> EndpointAdder<'a> {
                     "\n\t\t{}",
                     params_as_json_body_str.replace("\n", "\n\t\t")
                 ));
-                cpf!(s, "return handleCached(method: BEAMRequestMethod.{}, params: paramsJson, body: {}, expectedResponseType: {}).then((json) => {});", method_str,match (&body_str, &body_is_primitive) {
-                    (Some(_), true) => "body",
-                    (Some(_), false) => "body?.toJson()",
-                    (None, _) => "null",
-                }, match ret_is_binary {
+                let body_emission: String =
+                    match (&body_str, body_is_primitive, &body_list_inner_type) {
+                        // No body: send `null`.
+                        (None, _, _) => "null".to_string(),
+                        // Primitive body (single primitive OR `List<Primitive>`):
+                        // send raw, no serialization step needed.
+                        (Some(_), true, _) => "body".to_string(),
+                        // Non-primitive list body (`List<Object>` /
+                        // `List<Enum>`): Dart's built-in `List` has no
+                        // `.toJson()`, so we must serialize element-by-element.
+                        (Some(_), false, Some(_)) => {
+                            "body?.map((e) => e.toJson()).toList()".to_string()
+                        }
+                        // Single non-primitive body: call .toJson() directly.
+                        (Some(_), false, None) => "body?.toJson()".to_string(),
+                    };
+                cpf!(s, "return handleCached(method: BEAMRequestMethod.{}, params: paramsJson, body: {}, expectedResponseType: {}).then((json) => {});", method_str, body_emission, match ret_is_binary {
                     true => "BEAMExpectedResponseType.binary",
                     false => "BEAMExpectedResponseType.json",
                 }, match (ret_is_primitive, ret_list_inner_type) {

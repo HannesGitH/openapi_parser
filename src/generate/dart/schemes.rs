@@ -38,9 +38,10 @@ impl<'a> SchemeAdder<'a> {
     }
 
     /// Thin wrapper that asks the shared
-    /// [`IntermediateFormat::resolve_iast`] classifier whether the given
-    /// IAST resolves (after transitively following `Reference`s) to a
-    /// raw Dart primitive without `.toJson()` / `.fromJson()`.
+    /// [`crate::parse::intermediate::IntermediateFormat::resolve_iast`]
+    /// classifier whether the given IAST resolves (after transitively
+    /// following `Reference`s) to a raw Dart primitive without
+    /// `.toJson()` / `.fromJson()`.
     ///
     /// `Enum` primitives are intentionally NOT counted as primitive
     /// because the generator emits a real Dart enum class with
@@ -277,14 +278,21 @@ class BEAM{}Model implements BEAMSerde {{
                                 reason: GenerationSpecialCaseType::List(
                                     // the type of elements in the list
                                     self.class_name(&inner_name),
-                                    // weather the elements in the list are primitive
-                                    matches!(
-                                        inner_special_case,
-                                        Some(GenerationSpecialCase {
-                                            reason: GenerationSpecialCaseType::Primitive,
-                                            ..
-                                        })
-                                    ),
+                                    // Whether the elements in the list are
+                                    // a primitive Dart value (no
+                                    // `.toJson` / `.fromJson`). True for
+                                    // inline primitives, AND for `$ref`s
+                                    // whose target scheme resolves to a
+                                    // primitive typedef (`typedef Foo =
+                                    // String;` etc). Enums are NOT
+                                    // primitive here because the generator
+                                    // emits a real Dart enum class with
+                                    // `.fromJson` for them. The chain-
+                                    // following is handled by the shared
+                                    // resolver, so multi-hop refs
+                                    // (`Alias -> Id -> string`) behave the
+                                    // same as a direct ref.
+                                    self.iast_resolves_to_primitive(inner_iast),
                                 ),
                                 //XXX: use `self.class_name(name)` if we want the left part of the typedef
                                 // e.g. BEAM_v2_billing_subscriptions_subscribeMethods_postResponseModel

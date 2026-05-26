@@ -1,7 +1,7 @@
-mod generate;
-use generate::*;
-
-mod parse;
+// The modules `generate` and `parse` now live in `src/lib.rs` so they
+// can also be exercised from integration tests; pull what the CLI
+// needs back into scope from the library crate.
+use openapi_parser::generate::*;
 
 enum DestinationLanguage {
     Dart,
@@ -39,19 +39,16 @@ async fn fetch_spec_json(url: &str) -> Result<String, reqwest::Error> {
         .unwrap();
 
     let response = match username {
-        Ok(username) => client
-            .get(url)
-            .basic_auth(username, password.ok())
-            .send(),
+        Ok(username) => client.get(url).basic_auth(username, password.ok()).send(),
         Err(_) => client.get(url).send(),
-    }.await?;
+    }
+    .await?;
     let body = response.text().await?;
     Ok(body)
 }
 
 #[tokio::main]
 async fn main() {
-
     // parse args from the following format
     // --spec-url/-u <spec-url> --out-dir/-o <out-dir> --destination-language/-d <destination-language>
     let mut args = std::env::args().skip(1);
@@ -71,19 +68,17 @@ async fn main() {
             "--destination-language" | "-d" => {
                 destination_language = args.next().map(|lang| match lang.as_str() {
                     "dart" => DestinationLanguage::Dart,
-                    _ => panic!("Unsupported destination language")
+                    _ => panic!("Unsupported destination language"),
                 });
             }
             "--skip-deprecated-removal" => {
                 skip_deprecated_removal = true;
             }
-            _ => panic!("Unknown argument: {}", arg)
+            _ => panic!("Unknown argument: {}", arg),
         }
     }
 
-    let spec_url = spec_url.unwrap_or_else(|| {
-        panic!("Missing required argument: --spec-url/-u")
-    });
+    let spec_url = spec_url.unwrap_or_else(|| panic!("Missing required argument: --spec-url/-u"));
 
     let out_dir = out_dir.unwrap_or_else(|| std::path::PathBuf::from("out"));
 
@@ -106,7 +101,15 @@ async fn main() {
         }
     };
     println!("generating {:} code", destination_language);
-    let files = match destination_language.generate(&spec, GenerationArgs {ignore_deprecated_fields: !skip_deprecated_removal} ).await {
+    let files = match destination_language
+        .generate(
+            &spec,
+            GenerationArgs {
+                ignore_deprecated_fields: !skip_deprecated_removal,
+            },
+        )
+        .await
+    {
         Ok(files) => files,
         Err(e) => {
             println!("generating code error: {:?}", e);
