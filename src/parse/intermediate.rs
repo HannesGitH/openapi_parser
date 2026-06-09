@@ -19,6 +19,7 @@ pub struct IntermediateArgs {
 pub struct ParseCtx<'a> {
     pub args: IntermediateArgs,
     pub deprecated_schemes: HashSet<&'a str>,
+    pub schemas: &'a BTreeMap<String, ObjectOrReference<ObjectSchema>>,
 }
 
 impl<'a> ParseCtx<'a> {
@@ -68,6 +69,7 @@ pub fn parse(spec: &oas3::Spec, args: IntermediateArgs) -> Result<IntermediateFo
     let ctx = ParseCtx {
         args,
         deprecated_schemes,
+        schemas: &components.schemas,
     };
 
     for (name, schema) in components.schemas.iter() {
@@ -480,25 +482,23 @@ fn parse_object<'a>(
         return parse_properties();
     }
 
-    // 3:
+    // 3: allOf — merge every subschema (inline objects and `$ref`s) into a
+    //    single flat product type (intersection). Previously this collapsed to
+    //    a nullable ref, silently dropping inline properties and producing a
+    //    spurious NonNull wrapper in codegen.
     if !object.all_of.is_empty() {
-        let all = &object.all_of;
-        if all.len() == 2
-            && all
-                .iter()
-                .any(|schema| matches!(schema, ObjectOrReference::Ref { .. }))
-        {
-            if let Some(ObjectOrReference::Ref { ref_path }) = all
-                .iter()
-                .find(|schema| matches!(schema, ObjectOrReference::Ref { .. }))
-            {
-                return Ok(IAST::Reference(AnnotatedReference {
-                    path: ref_path,
-                    optional: is_optional,
-                    nullable: true,
-                    is_deprecated: ctx.ref_targets_deprecated(ref_path),
-                }));
-            }
+        let mut merged: HashMap<&'a str, IAST<'a>> = HashMap::new();
+        let mut visited: HashSet<&'a str> = HashSet::new();
+        collect_all_of_properties(ctx, &object.all_of, &mut merged, &mut visited)?;
+        if !merged.is_empty() {
+            return Ok(IAST::Object(AnnotatedObj {
+                nullable: object.is_nullable().unwrap_or(false),
+                optional: is_optional,
+                is_deprecated: object.deprecated.unwrap_or(false),
+                description: object.description.as_deref(),
+                title: object.title.as_deref(),
+                value: AlgType::Product(merged),
+            }));
         }
     }
 
@@ -520,6 +520,60 @@ fn parse_object<'a>(
         title: object.title.as_deref(),
         value: Primitive::Never,
     }))
+}
+
+/// Recursively collect the merged property set of an `allOf` list into `out`.
+/// Inline object subschemas contribute their properties directly; `$ref`
+/// subschemas have their target scheme's properties inlined. Nested `allOf`
+/// (in either an inline object or a referenced object) is followed. Later
+/// entries override earlier ones on key collision, matching JSON-Schema
+/// `allOf` intersection semantics for this generator's flat product model.
+/// `visited` guards against cyclic `$ref` chains.
+fn collect_all_of_properties<'a>(
+    ctx: &ParseCtx<'a>,
+    schemas: &'a [ObjectOrReference<ObjectSchema>],
+    out: &mut HashMap<&'a str, IAST<'a>>,
+    visited: &mut HashSet<&'a str>,
+) -> Result<(), Error> {
+    for schema in schemas {
+        match schema {
+            ObjectOrReference::Object(obj) => {
+                collect_object_properties(ctx, obj, out, visited)?;
+            }
+            ObjectOrReference::Ref { ref_path } => {
+                let target = strip_ref_prefix(ref_path);
+                if visited.insert(target) {
+                    if let Some(ObjectOrReference::Object(obj)) = ctx.schemas.get(target) {
+                        collect_object_properties(ctx, obj, out, visited)?;
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Merge a single object schema's own properties (and any nested `allOf`) into
+/// `out`. Mirrors the property handling in `parse_object`'s `parse_properties`
+/// closure, including the deprecated-field drop.
+fn collect_object_properties<'a>(
+    ctx: &ParseCtx<'a>,
+    object: &'a ObjectSchema,
+    out: &mut HashMap<&'a str, IAST<'a>>,
+    visited: &mut HashSet<&'a str>,
+) -> Result<(), Error> {
+    if !object.all_of.is_empty() {
+        collect_all_of_properties(ctx, &object.all_of, out, visited)?;
+    }
+    for (name, schema) in object.properties.iter() {
+        let is_required = object.required.iter().any(|n| n.as_str() == name.as_str());
+        let obj = parse_schema(ctx, schema, !is_required, false)?;
+        if ctx.args.ignore_deprecated_fields && iast_is_deprecated(&obj) {
+            continue;
+        }
+        out.insert(name.as_str(), obj);
+    }
+    Ok(())
 }
 
 fn convert_routes_to_tree<'a>(routes: &Vec<Route>) -> RouteFragment {

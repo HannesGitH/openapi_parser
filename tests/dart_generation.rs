@@ -706,3 +706,123 @@ fn resolve_ref_accepts_both_bare_and_full_paths() {
         ResolvedRef::Unknown
     );
 }
+
+/// `allOf` combining a `$ref` and an inline object must merge into a single
+/// product type carrying all properties — NOT collapse to a nullable ref that
+/// drops the inline fields (regression for the old 2-element allOf stub).
+#[test]
+fn all_of_merges_ref_and_inline_properties() {
+    use openapi_parser::parse::intermediate::{self, AlgType, IntermediateArgs, IAST};
+
+    let spec_json = r##"{
+        "openapi": "3.1.0",
+        "info": { "title": "t", "version": "0" },
+        "components": {
+            "schemas": {
+                "Base": {
+                    "type": "object",
+                    "properties": {
+                        "a": { "type": "string" },
+                        "b": { "type": "string" }
+                    },
+                    "required": ["a"]
+                },
+                "Derived": {
+                    "allOf": [
+                        { "$ref": "#/components/schemas/Base" },
+                        {
+                            "type": "object",
+                            "properties": { "c": { "type": "string" } },
+                            "required": ["c"]
+                        }
+                    ]
+                }
+            }
+        },
+        "paths": {}
+    }"##;
+    let spec = oas3::from_json(spec_json).expect("valid spec");
+    let intermediate = intermediate::parse(
+        &spec,
+        IntermediateArgs {
+            ignore_deprecated_fields: false,
+        },
+    )
+    .expect("intermediate parses");
+
+    let derived = intermediate.find_scheme("Derived").expect("Derived exists");
+    assert!(
+        !derived.is_inherently_nullable,
+        "allOf scheme must not be marked inherently nullable"
+    );
+    match &derived.obj {
+        IAST::Object(obj) => match &obj.value {
+            AlgType::Product(props) => {
+                let mut keys: Vec<&str> = props.keys().copied().collect();
+                keys.sort();
+                assert_eq!(
+                    keys,
+                    vec!["a", "b", "c"],
+                    "merged product must contain ref + inline properties"
+                );
+            }
+            _ => panic!("expected a Product type for the merged allOf"),
+        },
+        _ => panic!("expected an Object IAST for the merged allOf"),
+    }
+}
+
+/// End-to-end: an `allOf` scheme (ref + inline object, colliding `link`)
+/// must generate a normal product class with all merged fields and NO
+/// `NonNull` wrapper (regression for the allOf stub that collapsed to a
+/// nullable ref and dropped inline fields).
+#[test]
+fn all_of_generates_product_class_not_nullable_wrapper() {
+    let spec_json = r##"{
+        "openapi": "3.1.0",
+        "info": { "title": "t", "version": "0" },
+        "components": {
+            "schemas": {
+                "EmailContentInput": {
+                    "type": "object",
+                    "properties": {
+                        "emailTitle": { "type": "string", "minLength": 1 },
+                        "link": { "type": ["string", "null"], "minLength": 1 }
+                    },
+                    "required": ["emailTitle"]
+                },
+                "DigitalEmailContentInput": {
+                    "allOf": [
+                        { "$ref": "#/components/schemas/EmailContentInput" },
+                        {
+                            "type": "object",
+                            "properties": { "link": { "type": "string", "minLength": 1 } },
+                            "required": ["link"]
+                        }
+                    ]
+                }
+            }
+        },
+        "paths": {}
+    }"##;
+
+    let files = generate(spec_json);
+    let derived = file(&files, "schemes/DigitalEmailContentInput.dart");
+
+    assert!(
+        derived.contains("class BEAMDigitalEmailContentInputModel implements BEAMSerde"),
+        "expected a product class, got:\n{derived}"
+    );
+    assert!(
+        derived.contains("emailTitle"),
+        "missing ref field emailTitle:\n{derived}"
+    );
+    assert!(
+        derived.contains("link"),
+        "missing merged field link:\n{derived}"
+    );
+    assert!(
+        !derived.contains("NonNullModel"),
+        "allOf must not produce a NonNull wrapper:\n{derived}"
+    );
+}
