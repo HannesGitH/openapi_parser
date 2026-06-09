@@ -826,3 +826,88 @@ fn all_of_generates_product_class_not_nullable_wrapper() {
         "allOf must not produce a NonNull wrapper:\n{derived}"
     );
 }
+
+/// The idiomatic nullable `$ref` shape `allOf: [ {$ref}, {type:[<t>,"null"]} ]`
+/// must resolve to a (nullable) REFERENCE to the named scheme, NOT be inlined
+/// into an anonymous nested object. Regression for an over-eager allOf merge.
+#[test]
+fn all_of_nullable_ref_stays_reference() {
+    use openapi_parser::parse::intermediate::{self, AlgType, IntermediateArgs, IAST};
+
+    let spec_json = r##"{
+        "openapi": "3.1.0",
+        "info": { "title": "t", "version": "0" },
+        "components": {
+            "schemas": {
+                "Inner": { "type": "object", "properties": { "x": { "type": "string" } }, "required": ["x"] },
+                "Outer": {
+                    "type": "object",
+                    "properties": {
+                        "p": { "allOf": [ { "$ref": "#/components/schemas/Inner" }, { "type": ["object", "null"] } ] }
+                    },
+                    "required": ["p"]
+                }
+            }
+        },
+        "paths": {}
+    }"##;
+    let spec = oas3::from_json(spec_json).expect("valid spec");
+    let im = intermediate::parse(
+        &spec,
+        IntermediateArgs {
+            ignore_deprecated_fields: false,
+        },
+    )
+    .expect("parses");
+    let outer = im.find_scheme("Outer").expect("Outer exists");
+    match &outer.obj {
+        IAST::Object(o) => match &o.value {
+            AlgType::Product(props) => match props.get("p").expect("has p") {
+                IAST::Reference(r) => {
+                    assert!(r.nullable, "nullable-ref must be nullable");
+                    assert!(
+                        r.path.ends_with("Inner"),
+                        "must reference Inner, got {}",
+                        r.path
+                    );
+                }
+                _ => panic!("property `p` must stay a Reference, not be inlined"),
+            },
+            _ => panic!("expected a Product"),
+        },
+        _ => panic!("expected an Object"),
+    }
+}
+
+/// End-to-end counterpart: the nullable-ref property must generate a reference
+/// to the named model type, not an inlined `Outer_p` nested type.
+#[test]
+fn all_of_nullable_ref_generates_named_reference_property() {
+    let spec_json = r##"{
+        "openapi": "3.1.0",
+        "info": { "title": "t", "version": "0" },
+        "components": {
+            "schemas": {
+                "Inner": { "type": "object", "properties": { "x": { "type": "string" } }, "required": ["x"] },
+                "Outer": {
+                    "type": "object",
+                    "properties": {
+                        "p": { "allOf": [ { "$ref": "#/components/schemas/Inner" }, { "type": ["object", "null"] } ] }
+                    },
+                    "required": ["p"]
+                }
+            }
+        },
+        "paths": {}
+    }"##;
+    let files = generate(spec_json);
+    let outer = file(&files, "schemes/Outer.dart");
+    assert!(
+        outer.contains("BEAMInnerModel"),
+        "must reference the named Inner model:\n{outer}"
+    );
+    assert!(
+        !outer.contains("Outer_p"),
+        "must NOT inline the nullable ref into Outer_p:\n{outer}"
+    );
+}

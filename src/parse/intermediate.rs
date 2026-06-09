@@ -482,23 +482,60 @@ fn parse_object<'a>(
         return parse_properties();
     }
 
-    // 3: allOf — merge every subschema (inline objects and `$ref`s) into a
-    //    single flat product type (intersection). Previously this collapsed to
-    //    a nullable ref, silently dropping inline properties and producing a
-    //    spurious NonNull wrapper in codegen.
+    // 3: allOf. Two real shapes occur in practice:
+    //   (a) nullable `$ref`:  allOf: [ {$ref}, {type:[<t>,"null"]} ]
+    //       The non-ref member only attaches nullability (and/or a description)
+    //       to the ref and contributes NO properties. This MUST stay a reference
+    //       to the named scheme so generated type names remain stable for
+    //       consumers (this is the common case).
+    //   (b) composition:      allOf: [ {$ref}, {object with properties}, ... ]
+    //       At least one member adds real properties -> merge everything into a
+    //       single flat product type (intersection semantics).
     if !object.all_of.is_empty() {
-        let mut merged: HashMap<&'a str, IAST<'a>> = HashMap::new();
-        let mut visited: HashSet<&'a str> = HashSet::new();
-        collect_all_of_properties(ctx, &object.all_of, &mut merged, &mut visited)?;
-        if !merged.is_empty() {
-            return Ok(IAST::Object(AnnotatedObj {
-                nullable: object.is_nullable().unwrap_or(false),
-                optional: is_optional,
-                is_deprecated: object.deprecated.unwrap_or(false),
-                description: object.description.as_deref(),
-                title: object.title.as_deref(),
-                value: AlgType::Product(merged),
-            }));
+        let all = &object.all_of;
+
+        // Does any member contribute its own properties? Bare `$ref`s and pure
+        // nullability/`type` markers (e.g. {"type":["object","null"]}) do not.
+        let has_extra_props = all.iter().any(|s| match s {
+            ObjectOrReference::Object(o) => !o.properties.is_empty() || !o.all_of.is_empty(),
+            ObjectOrReference::Ref { .. } => false,
+        });
+
+        // Does any member permit null (the marker member in shape (a))?
+        let allows_null = all.iter().any(|s| match s {
+            ObjectOrReference::Object(o) => schema_allows_null(o),
+            ObjectOrReference::Ref { .. } => false,
+        });
+
+        if !has_extra_props {
+            // Shape (a): no member adds fields -> a (possibly nullable) reference.
+            if let Some(ObjectOrReference::Ref { ref_path }) = all
+                .iter()
+                .find(|s| matches!(s, ObjectOrReference::Ref { .. }))
+            {
+                return Ok(IAST::Reference(AnnotatedReference {
+                    path: ref_path,
+                    optional: is_optional,
+                    nullable: allows_null,
+                    is_deprecated: ctx.ref_targets_deprecated(ref_path),
+                }));
+            }
+        } else {
+            // Shape (b): merge all members (referenced schemas inlined + inline
+            // objects) into one flat product type.
+            let mut merged: HashMap<&'a str, IAST<'a>> = HashMap::new();
+            let mut visited: HashSet<&'a str> = HashSet::new();
+            collect_all_of_properties(ctx, all, &mut merged, &mut visited)?;
+            if !merged.is_empty() {
+                return Ok(IAST::Object(AnnotatedObj {
+                    nullable: object.is_nullable().unwrap_or(false) || allows_null,
+                    optional: is_optional,
+                    is_deprecated: object.deprecated.unwrap_or(false),
+                    description: object.description.as_deref(),
+                    title: object.title.as_deref(),
+                    value: AlgType::Product(merged),
+                }));
+            }
         }
     }
 
@@ -520,6 +557,19 @@ fn parse_object<'a>(
         title: object.title.as_deref(),
         value: Primitive::Never,
     }))
+}
+
+/// Whether an object schema permits `null` — either via the OAS 3.0
+/// `nullable: true` keyword or an OAS 3.1 type set that includes `"null"`
+/// (e.g. `{"type": ["object", "null"]}`). Used to detect the nullable-`$ref`
+/// `allOf` shape.
+fn schema_allows_null(object: &ObjectSchema) -> bool {
+    object.is_nullable().unwrap_or(false)
+        || object
+            .schema_type
+            .as_ref()
+            .map(|t| t.contains(SchemaType::Null))
+            .unwrap_or(false)
 }
 
 /// Recursively collect the merged property set of an `allOf` list into `out`.
