@@ -216,78 +216,65 @@ impl<'a> EndpointAdder<'a> {
                     ("()".to_string(), true, None, false)
                 } else {
                     let response_name = format!("{}_{}Response", name, method_str);
-                    if responses.len() == 1 {
-                        let (response_code, response) = responses.first_key_value().unwrap();
-                        let (content, sub_deps, special_case, nullable, optional, ret_is_binary) =
-                            self.scheme_adder.parse_named_iast(
-                                &response_name,
-                                &response,
-                                depth + 1,
-                            );
-                        let dep_path_str =
-                            format!("{}/{}.resp.{}.schema.dart", name, method_str, response_code);
-                        let dep_path = std::path::PathBuf::from(&dep_path_str);
-                        deps.push(File {
-                            path: dep_path,
-                            content: content,
-                        });
-                        deps.extend(sub_deps.into_iter().map(|f| File {
-                            path: std::path::PathBuf::from(format!(
-                                "{}/{}",
-                                name,
-                                f.path.to_str().unwrap()
-                            )),
-                            content: f.content,
-                        }));
-                        imports_str.push_str(&format!("import '{}';\n", &dep_path_str));
-                        imports_str.push_str(&format!("export '{}';\n", &dep_path_str));
-                        match special_case {
-                            Some(schemes::GenerationSpecialCase { reason, type_name }) => (
-                                type_name,
-                                // Is the response value a raw primitive
-                                // (no `.fromJson`) rather than a generated
-                                // class? Three sub-cases:
-                                //  - the IAST itself was primitive,
-                                //  - it was a list whose elements were
-                                //    flagged primitive,
-                                //  - it was a link (`$ref`) whose target
-                                //    transitively resolves to a primitive
-                                //    typedef (e.g. `typedef Foo = String;`).
-                                // The link case used to be a one-shot
-                                // open-coded `iter().find` only one hop
-                                // deep; it now goes through the shared
-                                // resolver which follows ref chains and
-                                // correctly classifies enums as non-primitive.
-                                match &reason {
-                                    GenerationSpecialCaseType::Primitive => true,
-                                    GenerationSpecialCaseType::List(_, is_primitive) => {
-                                        *is_primitive
-                                    }
-                                    GenerationSpecialCaseType::Link(link) => {
-                                        self.intermediate.resolve_ref(link).is_primitive()
-                                    }
-                                },
-                                if let GenerationSpecialCaseType::List(inner_type, _) = reason {
-                                    Some(inner_type)
-                                } else {
-                                    None
-                                },
-                                ret_is_binary,
-                            ),
-                            None => (
-                                self.scheme_adder.class_name(&response_name),
-                                false,
-                                None,
-                                ret_is_binary,
-                            ),
-                        }
-                    } else {
-                        (
-                            "//TODO: add parser for multiple responses".to_string(),
+                    //TODO: add parser for multiple responses
+                    let (response_code, response) = responses.first_key_value().unwrap();
+                    let (content, sub_deps, special_case, nullable, optional, ret_is_binary) = self
+                        .scheme_adder
+                        .parse_named_iast(&response_name, &response, depth + 1);
+                    let dep_path_str =
+                        format!("{}/{}.resp.{}.schema.dart", name, method_str, response_code);
+                    let dep_path = std::path::PathBuf::from(&dep_path_str);
+                    deps.push(File {
+                        path: dep_path,
+                        content: content,
+                    });
+                    deps.extend(sub_deps.into_iter().map(|f| File {
+                        path: std::path::PathBuf::from(format!(
+                            "{}/{}",
+                            name,
+                            f.path.to_str().unwrap()
+                        )),
+                        content: f.content,
+                    }));
+                    imports_str.push_str(&format!("import '{}';\n", &dep_path_str));
+                    imports_str.push_str(&format!("export '{}';\n", &dep_path_str));
+                    match special_case {
+                        Some(schemes::GenerationSpecialCase { reason, type_name }) => (
+                            type_name,
+                            // Is the response value a raw primitive
+                            // (no `.fromJson`) rather than a generated
+                            // class? Three sub-cases:
+                            //  - the IAST itself was primitive,
+                            //  - it was a list whose elements were
+                            //    flagged primitive,
+                            //  - it was a link (`$ref`) whose target
+                            //    transitively resolves to a primitive
+                            //    typedef (e.g. `typedef Foo = String;`).
+                            // The link case used to be a one-shot
+                            // open-coded `iter().find` only one hop
+                            // deep; it now goes through the shared
+                            // resolver which follows ref chains and
+                            // correctly classifies enums as non-primitive.
+                            match &reason {
+                                GenerationSpecialCaseType::Primitive => true,
+                                GenerationSpecialCaseType::List(_, is_primitive) => *is_primitive,
+                                GenerationSpecialCaseType::Link(link) => {
+                                    self.intermediate.resolve_ref(link).is_primitive()
+                                }
+                            },
+                            if let GenerationSpecialCaseType::List(inner_type, _) = reason {
+                                Some(inner_type)
+                            } else {
+                                None
+                            },
+                            ret_is_binary,
+                        ),
+                        None => (
+                            self.scheme_adder.class_name(&response_name),
                             false,
                             None,
-                            false,
-                        )
+                            ret_is_binary,
+                        ),
                     }
                 }
             };
