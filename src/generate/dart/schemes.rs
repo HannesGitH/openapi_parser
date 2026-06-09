@@ -185,8 +185,10 @@ class BEAM{}Model implements BEAMSerde {{
                 let link = annotated_ref.path;
                 let trimmed_link = sanitize(strip_ref_prefix(link));
                 (
+                    // some references are nullable also (this should not be, but leons vibes introduce them nontheless), so we need to add the serde import anyway
                     format!(
-                        "export '{}schemes/{}.dart';\nimport '{}schemes/{}.dart';\n",
+                        "// ignore_for_file: unused_import\nimport '{}utils/serde.dart';\nexport '{}schemes/{}.dart';\nimport '{}schemes/{}.dart';\n",
+                        "../".repeat(depth + 1),
                         "../".repeat(depth + 1),
                         trimmed_link,
                         "../".repeat(depth + 1),
