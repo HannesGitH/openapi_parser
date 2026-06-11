@@ -121,6 +121,12 @@
                 pkgs.pkg-config
                 pkgs.openssl
               ];
+
+              # rust-analyzer loads the standard library from the sysroot
+              # reported by `rustc --print sysroot`, but nixpkgs ships the
+              # stdlib source separately. Point it at that source so the
+              # "can't load standard library from sysroot" error goes away.
+              RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
             }
             // lib.optionalAttrs pkgs.stdenv.isDarwin {
               # CodeLLDB's bundled liblldb does not search PATH for `debugserver`

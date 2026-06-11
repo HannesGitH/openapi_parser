@@ -64,10 +64,7 @@ impl<'a> EndpointAdder<'a> {
         let intermediate = self.intermediate;
         let mut out_files: Vec<File> = Vec::new();
         let interface_content = include_str!("endpoints/interface.dart");
-        let schemes::EnumCode {
-            class_name: path_enum_name,
-            content: paths_enum_content,
-        } = self.scheme_adder.generate_primitive_sum_type(
+        let paths_enum = self.scheme_adder.generate_primitive_sum_type(
             "Paths",
             "",
             &intermediate
@@ -85,13 +82,12 @@ impl<'a> EndpointAdder<'a> {
         for route in &intermediate.routes {
             let sanitized_path = sanitize(route.path);
             let name = format!("{}Methods", sanitized_path);
-            let GeneratedCode { content, files } =
-                self.generate_path_method_wrapper(&name, route, 1);
+            let wrapper = self.generate_path_method_wrapper(&name, route, 1);
             out_files.push(File {
                 path: std::path::PathBuf::from(format!("routes/{}.dart", sanitized_path)),
-                content,
+                content: wrapper.content,
             });
-            out_files.extend(files.into_iter().map(|f| File {
+            out_files.extend(wrapper.files.into_iter().map(|f| File {
                 path: std::path::PathBuf::from(format!("routes/{}", f.path.to_str().unwrap())),
                 content: f.content,
             }));
@@ -116,8 +112,11 @@ impl<'a> EndpointAdder<'a> {
         cpf!(imports_content, "import '{}';", root_frag_file_name);
         let mut content = String::new();
         content.push_str(&imports_content);
-        content.push_str(&format!("typedef BEAMPathEnum={};\n", path_enum_name));
-        content.push_str(&paths_enum_content);
+        content.push_str(&format!(
+            "typedef BEAMPathEnum={};\n",
+            paths_enum.class_name
+        ));
+        content.push_str(&paths_enum.content);
         content.push_str(&interface_content);
         out_files.push(File {
             path: std::path::PathBuf::from("endpoints.dart"),
@@ -176,15 +175,10 @@ impl<'a> EndpointAdder<'a> {
                 Some(request) => {
                     //do things
                     let request_name = format!("{}{}Request", name, method_str);
-                    let schemes::ParsedIast {
-                        content,
-                        files: sub_deps,
-                        special_case,
-                        ..
-                    } = self
-                        .scheme_adder
-                        .parse_named_iast(&request_name, request, depth + 1);
-                    deps.extend(sub_deps.into_iter().map(|f| File {
+                    let parsed =
+                        self.scheme_adder
+                            .parse_named_iast(&request_name, request, depth + 1);
+                    deps.extend(parsed.files.into_iter().map(|f| File {
                         path: std::path::PathBuf::from(format!(
                             "{}/{}",
                             name,
@@ -196,7 +190,7 @@ impl<'a> EndpointAdder<'a> {
                     let dep_path = std::path::PathBuf::from(&dep_path_str);
                     deps.push(File {
                         path: dep_path,
-                        content,
+                        content: parsed.content,
                     });
                     imports_str.push_str(&format!("import '{}';\n", &dep_path_str));
                     imports_str.push_str(&format!("export '{}';\n", &dep_path_str));
@@ -211,7 +205,7 @@ impl<'a> EndpointAdder<'a> {
                     // chain-following via the shared `resolve_ref`), so
                     // `List<Primitive>` and `List<$ref to primitive typedef>`
                     // both bucket as primitive.
-                    match special_case {
+                    match parsed.special_case {
                         Some(schemes::GenerationSpecialCase { reason, type_name }) => BodyClass {
                             decl: Some(format!(" {{required {} body}}", type_name)),
                             is_primitive: match &reason {
@@ -253,10 +247,7 @@ impl<'a> EndpointAdder<'a> {
             } else {
                 format!("{} params,", param_name)
             };
-            let ParamsCode {
-                typedef: params_1typedef_str,
-                as_json_body: params_as_json_body_str,
-            } = mk_params(&method.params, &param_name);
+            let params = mk_params(&method.params, &param_name);
 
             let response_class = {
                 let responses = &method.responses;
@@ -271,23 +262,17 @@ impl<'a> EndpointAdder<'a> {
                     let response_name = format!("{}_{}Response", name, method_str);
                     //TODO: add parser for multiple responses
                     let (response_code, response) = responses.first_key_value().unwrap();
-                    let schemes::ParsedIast {
-                        content,
-                        files: sub_deps,
-                        special_case,
-                        is_binary: ret_is_binary,
-                        ..
-                    } = self
-                        .scheme_adder
-                        .parse_named_iast(&response_name, &response, depth + 1);
+                    let parsed =
+                        self.scheme_adder
+                            .parse_named_iast(&response_name, &response, depth + 1);
                     let dep_path_str =
                         format!("{}/{}.resp.{}.schema.dart", name, method_str, response_code);
                     let dep_path = std::path::PathBuf::from(&dep_path_str);
                     deps.push(File {
                         path: dep_path,
-                        content: content,
+                        content: parsed.content,
                     });
-                    deps.extend(sub_deps.into_iter().map(|f| File {
+                    deps.extend(parsed.files.into_iter().map(|f| File {
                         path: std::path::PathBuf::from(format!(
                             "{}/{}",
                             name,
@@ -297,7 +282,7 @@ impl<'a> EndpointAdder<'a> {
                     }));
                     imports_str.push_str(&format!("import '{}';\n", &dep_path_str));
                     imports_str.push_str(&format!("export '{}';\n", &dep_path_str));
-                    match special_case {
+                    match parsed.special_case {
                         Some(schemes::GenerationSpecialCase { reason, type_name }) => {
                             ResponseClass {
                                 type_str: type_name,
@@ -333,14 +318,14 @@ impl<'a> EndpointAdder<'a> {
                                 } else {
                                     None
                                 },
-                                is_binary: ret_is_binary,
+                                is_binary: parsed.is_binary,
                             }
                         }
                         None => ResponseClass {
                             type_str: self.scheme_adder.class_name(&response_name),
                             is_primitive: false,
                             list_inner_type: None,
-                            is_binary: ret_is_binary,
+                            is_binary: parsed.is_binary,
                         },
                     }
                 }
@@ -349,7 +334,7 @@ impl<'a> EndpointAdder<'a> {
                 let mut s = String::new();
                 s.push_str(&format!(
                     "\n\t\t{}",
-                    params_as_json_body_str.replace("\n", "\n\t\t")
+                    params.as_json_body.replace("\n", "\n\t\t")
                 ));
                 let body_emission: String = match (
                     &body_class.decl,
@@ -375,14 +360,14 @@ impl<'a> EndpointAdder<'a> {
                     false => "BEAMExpectedResponseType.json",
                 }, match (response_class.is_primitive, &response_class.list_inner_type) {
                     (true, None) => "json".to_string(),
-                    (true, Some(inner_type)) => format!("json"),
+                    (true, Some(_)) => format!("json"),
                     (false, Some(inner_type)) => format!("(json as List).map((e) => {}.fromJson(e)).toList()", inner_type),
                     (false, None) => format!("{}.fromJson(json)", response_class.type_str),
                 });
                 s
             };
 
-            param_typedef_strs.push_str(&params_1typedef_str);
+            param_typedef_strs.push_str(&params.typedef);
             cpf!(
                 c,
                 "\n\t///{}\n\t///",
@@ -431,7 +416,7 @@ impl<'a> EndpointAdder<'a> {
         let mut imports_str = String::new();
 
         use intermediate::RouteFragment;
-        let mut class_name = format!("BEAM{}Frag_{}", name, "unknown");
+        let class_name;
         match fragment {
             RouteFragment::Node(node) => {
                 cpf!(
@@ -464,11 +449,8 @@ impl<'a> EndpointAdder<'a> {
                 }
                 for child in &node.children {
                     let child_name = format!("{}_{}", name, node.path_fragment_name);
-                    let GeneratedFragment {
-                        class_name: child_class_name,
-                        content: child_str,
-                        files: child_deps,
-                    } = self.generate_route_fragment(&child_name, child, routes, false, depth + 1);
+                    let child_frag =
+                        self.generate_route_fragment(&child_name, child, routes, false, depth + 1);
                     let child_file_name = format!(
                         "{}/{}.dart",
                         sub_dir_name,
@@ -483,17 +465,17 @@ impl<'a> EndpointAdder<'a> {
                                     cpf!(
                                         s,
                                         "\t{} {}(String param) => {}(parent: this, param: param, deps: this.deps);",
-                                        child_class_name,
+                                        child_frag.class_name,
                                         child_getter_name,
-                                        child_class_name
+                                        child_frag.class_name
                                     );
                                 } else {
                                     cpf!(
                                         s,
                                         "\t{} get {} => {}(parent: this, deps: this.deps);",
-                                        child_class_name,
+                                        child_frag.class_name,
                                         child_getter_name,
-                                        child_class_name
+                                        child_frag.class_name
                                     );
                                 };
                                 child_frag_name
@@ -502,8 +484,8 @@ impl<'a> EndpointAdder<'a> {
                                 cpf!(
                                     s,
                                     "\t{} call() => {}(interpolatedPath: this.path, handler: this.deps);",
-                                    child_class_name,
-                                    child_class_name
+                                    child_frag.class_name,
+                                    child_frag.class_name
                                 );
                                 "leaf"
                             }
@@ -511,9 +493,9 @@ impl<'a> EndpointAdder<'a> {
                     );
                     let sub_frag_file = File {
                         path: std::path::PathBuf::from(&child_file_name),
-                        content: child_str,
+                        content: child_frag.content,
                     };
-                    deps.extend(child_deps.into_iter().map(|f| File {
+                    deps.extend(child_frag.files.into_iter().map(|f| File {
                         path: std::path::PathBuf::from(format!(
                             "{}/{}",
                             sub_dir_name,
@@ -528,7 +510,7 @@ impl<'a> EndpointAdder<'a> {
                 cpf!(s, "}}\n");
             }
             RouteFragment::Leaf(RouteFragmentLeafData { route_idx }) => {
-                let route = &routes[*route_idx];
+                let route = &(routes[*route_idx]);
                 let sanitized_route_str = sanitize(route.path);
                 s.push_str(&format!(
                     "export '{}routes/{}.dart';",

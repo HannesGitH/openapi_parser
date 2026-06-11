@@ -2,8 +2,7 @@ use std::collections::HashMap;
 
 use super::super::interface::*;
 
-use crate::parse::intermediate::{strip_ref_prefix, AlgType, AnnotatedObj, Primitive};
-#[allow(unused_imports)]
+use crate::parse::intermediate::{strip_ref_prefix, AnnotatedObj, Primitive};
 use crate::{cpf, parse::intermediate};
 
 #[allow(non_upper_case_globals)]
@@ -57,11 +56,7 @@ impl<'a> SchemeAdder<'a> {
         let mut scheme_files = Vec::new();
         for scheme in self.complete_iast.unwrap().schemes.iter() {
             let sanitized_scheme_name = sanitize(scheme.name);
-            let ParsedIast {
-                mut content,
-                files: depends_on_files,
-                ..
-            } = self.parse_named_iast(
+            let mut parsed = self.parse_named_iast(
                 format!(
                     "{}{}",
                     sanitized_scheme_name,
@@ -79,7 +74,7 @@ impl<'a> SchemeAdder<'a> {
             if scheme.is_inherently_nullable {
                 // lol irgendwann sollte man mal auf ne templating engine umsteigen
                 cpf!(
-                    content,
+                    parsed.content,
                     "
 class BEAM{}Model implements BEAMSerde {{
 
@@ -106,10 +101,10 @@ class BEAM{}Model implements BEAMSerde {{
             }
             let file = File {
                 path: std::path::PathBuf::from(format!("{}.dart", sanitized_scheme_name)),
-                content,
+                content: parsed.content,
             };
             scheme_files.push(file);
-            scheme_files.extend(depends_on_files);
+            scheme_files.extend(parsed.files);
         }
         // add barrel file
         scheme_files.push(File {
@@ -151,11 +146,10 @@ class BEAM{}Model implements BEAMSerde {{
                 use intermediate::AlgType;
                 match alg_type {
                     AlgType::Sum(sum) => {
-                        let GeneratedCode { content, files } =
-                            self.generate_sum_type(name, &doc_str, sum, depth);
+                        let generated = self.generate_sum_type(name, &doc_str, sum, depth);
                         ParsedIast {
-                            content,
-                            files,
+                            content: generated.content,
+                            files: generated.files,
                             special_case: None,
                             nullable: annotated_obj.nullable,
                             optional: annotated_obj.optional,
@@ -163,11 +157,15 @@ class BEAM{}Model implements BEAMSerde {{
                         }
                     }
                     AlgType::DiscriminatedSum(discrimination) => {
-                        let GeneratedCode { content, files } = self
-                            .generate_discriminated_sum_type(name, &doc_str, discrimination, depth);
+                        let generated = self.generate_discriminated_sum_type(
+                            name,
+                            &doc_str,
+                            discrimination,
+                            depth,
+                        );
                         ParsedIast {
-                            content,
-                            files,
+                            content: generated.content,
+                            files: generated.files,
                             special_case: None,
                             nullable: annotated_obj.nullable,
                             optional: annotated_obj.optional,
@@ -175,11 +173,10 @@ class BEAM{}Model implements BEAMSerde {{
                         }
                     }
                     AlgType::Product(product) => {
-                        let GeneratedCode { content, files } =
-                            self.generate_product_type(name, &doc_str, product, depth);
+                        let generated = self.generate_product_type(name, &doc_str, product, depth);
                         ParsedIast {
-                            content,
-                            files,
+                            content: generated.content,
+                            files: generated.files,
                             special_case: None,
                             nullable: annotated_obj.nullable,
                             optional: annotated_obj.optional,
@@ -229,10 +226,7 @@ class BEAM{}Model implements BEAMSerde {{
                 };
                 match &annotated_obj.value {
                     intermediate::types::Primitive::Enum(allowed_values) => {
-                        let EnumCode {
-                            class_name,
-                            content,
-                        } = self.generate_primitive_sum_type(
+                        let enum_code = self.generate_primitive_sum_type(
                             name,
                             &doc_str,
                             &allowed_values
@@ -245,9 +239,9 @@ class BEAM{}Model implements BEAMSerde {{
                                 .collect::<Vec<_>>(),
                         );
                         let mut ret = String::new();
-                        ret.push_str(&mk_type_def(name, &class_name, false));
+                        ret.push_str(&mk_type_def(name, &enum_code.class_name, false));
 
-                        ret.push_str(&content);
+                        ret.push_str(&enum_code.content);
                         ParsedIast {
                             content: ret,
                             files: vec![],
@@ -260,22 +254,17 @@ class BEAM{}Model implements BEAMSerde {{
                     }
                     intermediate::types::Primitive::List(inner_iast) => {
                         let mut inner_name = &format!("{}_", name);
-                        let ParsedIast {
-                            mut content,
-                            files: depends_on_files,
-                            special_case: inner_special_case,
-                            ..
-                        } = self.parse_named_iast(&inner_name, inner_iast, depth);
+                        let mut inner = self.parse_named_iast(&inner_name, inner_iast, depth);
                         let mut file_dependencies = Vec::new();
 
-                        for f in depends_on_files.into_iter() {
+                        for f in inner.files.into_iter() {
                             file_dependencies.push(f);
                         }
 
                         if let Some(GenerationSpecialCase {
                             type_name: _,
                             reason: GenerationSpecialCaseType::Link(internal_type_name),
-                        }) = &inner_special_case
+                        }) = &inner.special_case
                         {
                             println!("list of link: {}", internal_type_name);
                             inner_name = internal_type_name;
@@ -283,10 +272,12 @@ class BEAM{}Model implements BEAMSerde {{
 
                         let outer_name = format!("List<{}>", self.class_name(&inner_name));
 
-                        content.push_str(&mk_type_def(name, &outer_name, true));
+                        inner
+                            .content
+                            .push_str(&mk_type_def(name, &outer_name, true));
 
                         ParsedIast {
-                            content,
+                            content: inner.content,
                             files: file_dependencies,
                             special_case: Some(GenerationSpecialCase {
                                 reason: GenerationSpecialCaseType::List(
@@ -386,28 +377,23 @@ class BEAM{}Model implements BEAMSerde {{
         {
             let sanitized_inner_name = sanitize(union_inner_name);
             let mut variant_name = index_to_name(&sanitized_inner_name);
-            let ParsedIast {
-                content,
-                files: depends_on_files,
-                special_case: not_built,
-                ..
-            } = self.parse_named_iast(&variant_name, iast, depth + 1);
+            let parsed = self.parse_named_iast(&variant_name, iast, depth + 1);
             if let Some(GenerationSpecialCase {
                 type_name: _,
                 reason: GenerationSpecialCaseType::Link(internal_type_name),
-            }) = &not_built
+            }) = &parsed.special_case
             {
                 variant_name = index_to_name(&internal_type_name);
             }
             file_dependencies.push(File {
                 path: std::path::PathBuf::from(format!("{}/{}.dart", name, sanitized_inner_name)),
-                content,
+                content: parsed.content,
             });
             variants.push(SumVariantClass {
                 class_name: self.class_name(&variant_name),
-                special_case: not_built,
+                special_case: parsed.special_case,
             });
-            for f in depends_on_files.into_iter() {
+            for f in parsed.files.into_iter() {
                 sub_file_dependencies.push(f);
             }
         }
@@ -760,10 +746,7 @@ class BEAM{}Model implements BEAMSerde {{
                 let (prim_type, prim_data) = match &prim.value {
                     intermediate::types::Primitive::Enum(allowed_values) => {
                         let full_name = format!("{}_{}", name, sanitized_p_name);
-                        let EnumCode {
-                            class_name,
-                            content,
-                        } = self.generate_primitive_sum_type(
+                        let enum_code = self.generate_primitive_sum_type(
                             &full_name,
                             doc_str,
                             &allowed_values
@@ -775,22 +758,17 @@ class BEAM{}Model implements BEAMSerde {{
                                 })
                                 .collect::<Vec<_>>(),
                         );
-                        extra_content.push_str(&content);
-                        (class_name, PropertyType::Normal)
+                        extra_content.push_str(&enum_code.content);
+                        (enum_code.class_name, PropertyType::Normal)
                     }
                     intermediate::types::Primitive::List(inner_iast) => {
                         let mut full_name = &format!("{}_{}", name, sanitized_p_name);
-                        let ParsedIast {
-                            content,
-                            files: depends_on_files,
-                            special_case: inner_special_case,
-                            ..
-                        } = self.parse_named_iast(&full_name, inner_iast, depth + 1);
+                        let parsed = self.parse_named_iast(&full_name, inner_iast, depth + 1);
 
                         if let Some(GenerationSpecialCase {
                             type_name: _,
                             reason: GenerationSpecialCaseType::Link(internal_type_name),
-                        }) = &inner_special_case
+                        }) = &parsed.special_case
                         {
                             println!("list of link (product){} {}", internal_type_name, full_name);
                             full_name = internal_type_name;
@@ -801,9 +779,9 @@ class BEAM{}Model implements BEAMSerde {{
                                 "{}/{}.dart",
                                 name, sanitized_p_name
                             )),
-                            content,
+                            content: parsed.content,
                         });
-                        for f in depends_on_files.into_iter() {
+                        for f in parsed.files.into_iter() {
                             file_sub_dependencies.push(f);
                         }
                         let inner_class_name = self.class_name(&full_name);
@@ -834,19 +812,15 @@ class BEAM{}Model implements BEAMSerde {{
                     }
                     intermediate::types::Primitive::Map(inner_iast) => {
                         let full_name = format!("{}_{}", name, sanitized_p_name);
-                        let ParsedIast {
-                            content,
-                            files: depends_on_files,
-                            ..
-                        } = self.parse_named_iast(&full_name, inner_iast, depth + 1);
+                        let parsed = self.parse_named_iast(&full_name, inner_iast, depth + 1);
                         file_dependencies.push(File {
                             path: std::path::PathBuf::from(format!(
                                 "{}/{}.dart",
                                 name, sanitized_p_name
                             )),
-                            content,
+                            content: parsed.content,
                         });
-                        for f in depends_on_files.into_iter() {
+                        for f in parsed.files.into_iter() {
                             file_sub_dependencies.push(f);
                         }
                         (
@@ -875,18 +849,11 @@ class BEAM{}Model implements BEAMSerde {{
             }
             let full_name = format!("{}_{}", name, sanitized_p_name);
             let mut type_name = self.class_name(&full_name);
-            let ParsedIast {
-                content,
-                files: depends_on_files,
-                special_case,
-                nullable,
-                optional,
-                ..
-            } = self.parse_named_iast(&full_name, iast, depth + 1);
+            let parsed = self.parse_named_iast(&full_name, iast, depth + 1);
             if let Some(GenerationSpecialCase {
                 reason: GenerationSpecialCaseType::Link(internal_type_name),
                 type_name: _,
-            }) = special_case
+            }) = parsed.special_case
             {
                 println!("link: {} {}", internal_type_name, type_name);
                 //XXX: use `self.class_name(name)` if we want the left part of the typedef
@@ -910,16 +877,16 @@ class BEAM{}Model implements BEAMSerde {{
             properties.push(Property {
                 name: p_name,
                 typ: type_name,
-                nullable: nullable || optional,
-                optional: optional,
+                nullable: parsed.nullable || parsed.optional,
+                optional: parsed.optional,
                 doc_str: "".to_string(),
                 prop_type,
             });
             file_dependencies.push(File {
                 path: std::path::PathBuf::from(format!("{}/{}.dart", name, sanitized_p_name)),
-                content,
+                content: parsed.content,
             });
-            for f in depends_on_files.into_iter() {
+            for f in parsed.files.into_iter() {
                 file_sub_dependencies.push(f);
             }
         }
@@ -990,8 +957,8 @@ class BEAM{}Model implements BEAMSerde {{
                 } else {
                     match &prop.prop_type {
                         PropertyType::Primitive(PrimitivePropertyType::List {
-                            inner_type,
                             inner_is_primitive,
+                            ..
                         }) => {
                             format!(
                                 "?.map((e) => {}).toList()",

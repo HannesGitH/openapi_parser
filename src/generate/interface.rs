@@ -5,7 +5,11 @@ pub struct GenerationArgs {
 
 pub trait Generator {
     // generate a list of files (name, content)
-    async fn generate(&self, spec: &oas3::Spec, args: GenerationArgs) -> Result<Vec<File>, String>;
+    fn generate(
+        &self,
+        spec: &oas3::Spec,
+        args: GenerationArgs,
+    ) -> impl std::future::Future<Output = Result<Vec<File>, String>> + Send;
 }
 
 pub struct File {

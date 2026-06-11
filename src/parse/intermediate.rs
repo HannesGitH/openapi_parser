@@ -46,7 +46,7 @@ pub enum Error {
     ParseError(String),
 }
 
-pub fn parse(spec: &oas3::Spec, args: IntermediateArgs) -> Result<IntermediateFormat, Error> {
+pub fn parse(spec: &oas3::Spec, args: IntermediateArgs) -> Result<IntermediateFormat<'_>, Error> {
     let mut schemes = Vec::new();
     let components = match &spec.components {
         Some(components) => components,
