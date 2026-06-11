@@ -3,12 +3,28 @@ use crate::{
         dart::schemes::{
             create_property_name, sanitize, sanitize_identifier, GenerationSpecialCaseType,
         },
-        File,
+        File, GeneratedCode,
     },
     parse::intermediate::{self, Route, RouteFragmentLeafData},
 };
 
 use super::schemes;
+
+/// Result of [`EndpointAdder::generate_route_fragment`]: the generated
+/// fragment class, its own class name (so the parent can reference it)
+/// and the files it depends on.
+struct GeneratedFragment {
+    class_name: String,
+    content: String,
+    files: Vec<File>,
+}
+
+/// Result of [`mk_params`]: the Dart `typedef` for the params record and
+/// the snippet that builds the `paramsJson` map from those params.
+struct ParamsCode {
+    typedef: String,
+    as_json_body: String,
+}
 
 #[macro_use]
 mod macros;
@@ -31,7 +47,10 @@ impl<'a> EndpointAdder<'a> {
         let intermediate = self.intermediate;
         let mut out_files: Vec<File> = Vec::new();
         let interface_content = include_str!("endpoints/interface.dart");
-        let (path_enum_name, paths_enum_content) = self.scheme_adder.generate_primitive_sum_type(
+        let schemes::EnumCode {
+            class_name: path_enum_name,
+            content: paths_enum_content,
+        } = self.scheme_adder.generate_primitive_sum_type(
             "Paths",
             "",
             &intermediate
@@ -45,7 +64,8 @@ impl<'a> EndpointAdder<'a> {
         for route in &intermediate.routes {
             let sanitized_path = sanitize(route.path);
             let name = format!("{}Methods", sanitized_path);
-            let (content, files) = self.generate_path_method_wrapper(&name, route, 1);
+            let GeneratedCode { content, files } =
+                self.generate_path_method_wrapper(&name, route, 1);
             out_files.push(File {
                 path: std::path::PathBuf::from(format!("routes/{}.dart", sanitized_path)),
                 content,
@@ -56,7 +76,11 @@ impl<'a> EndpointAdder<'a> {
             }));
         }
 
-        let (frag_class_name, frag_content, frag_deps) = self.generate_route_fragment(
+        let GeneratedFragment {
+            class_name: frag_class_name,
+            content: frag_content,
+            files: frag_deps,
+        } = self.generate_route_fragment(
             "root",
             &intermediate.routes_tree,
             &intermediate.routes,
@@ -93,7 +117,7 @@ impl<'a> EndpointAdder<'a> {
         name: &str,
         route: &Route,
         depth: usize,
-    ) -> (String, Vec<File>) {
+    ) -> GeneratedCode {
         let mut deps: Vec<File> = Vec::new();
         let mut imports_str = String::new();
         let mut c = String::new();
@@ -212,8 +236,10 @@ impl<'a> EndpointAdder<'a> {
             } else {
                 format!("{} params,", param_name)
             };
-            let (params_1typedef_str, params_as_json_body_str) =
-                &mk_params(&method.params, &param_name);
+            let ParamsCode {
+                typedef: params_1typedef_str,
+                as_json_body: params_as_json_body_str,
+            } = mk_params(&method.params, &param_name);
 
             let (ret_type_str, ret_is_primitive, ret_list_inner_type, ret_is_binary) = {
                 let responses = &method.responses;
@@ -351,7 +377,10 @@ impl<'a> EndpointAdder<'a> {
         c.push_str(&param_typedef_strs);
         // c.push_str(&all_ret_types_str);
         imports_str.push_str(&c);
-        (imports_str, deps)
+        GeneratedCode {
+            content: imports_str,
+            files: deps,
+        }
     }
 
     /// returns its own class name, the content to build it and the files it depends on
@@ -362,7 +391,7 @@ impl<'a> EndpointAdder<'a> {
         routes: &[Route],
         is_root: bool,
         depth: usize,
-    ) -> (String, String, Vec<File>) {
+    ) -> GeneratedFragment {
         let name = sanitize(name);
         let mut s = String::new();
         let mut deps = Vec::new();
@@ -402,8 +431,11 @@ impl<'a> EndpointAdder<'a> {
                 }
                 for child in &node.children {
                     let child_name = format!("{}_{}", name, node.path_fragment_name);
-                    let (child_class_name, child_str, child_deps) =
-                        self.generate_route_fragment(&child_name, child, routes, false, depth + 1);
+                    let GeneratedFragment {
+                        class_name: child_class_name,
+                        content: child_str,
+                        files: child_deps,
+                    } = self.generate_route_fragment(&child_name, child, routes, false, depth + 1);
                     let child_file_name = format!(
                         "{}/{}.dart",
                         sub_dir_name,
@@ -474,11 +506,15 @@ impl<'a> EndpointAdder<'a> {
             }
         };
         imports_str.push_str(&s);
-        (class_name, imports_str, deps)
+        GeneratedFragment {
+            class_name,
+            content: imports_str,
+            files: deps,
+        }
     }
 }
 
-fn mk_params(params: &[intermediate::Param], name: &str) -> (String, String) {
+fn mk_params(params: &[intermediate::Param], name: &str) -> ParamsCode {
     let mut s_typedef = String::new();
     let mut s_as_json_body = String::new();
     cpf!(s_typedef, "typedef {} = (", name);
@@ -515,7 +551,10 @@ fn mk_params(params: &[intermediate::Param], name: &str) -> (String, String) {
     }
     cpf!(s_typedef, ");\n");
     cpf!(s_as_json_body, "}};");
-    (s_typedef, s_as_json_body)
+    ParamsCode {
+        typedef: s_typedef,
+        as_json_body: s_as_json_body,
+    }
 }
 
 impl intermediate::Method {

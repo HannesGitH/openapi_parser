@@ -151,7 +151,8 @@ class BEAM{}Model implements BEAMSerde {{
                 use intermediate::AlgType;
                 match alg_type {
                     AlgType::Sum(sum) => {
-                        let (content, files) = self.generate_sum_type(name, &doc_str, sum, depth);
+                        let GeneratedCode { content, files } =
+                            self.generate_sum_type(name, &doc_str, sum, depth);
                         ParsedIast {
                             content,
                             files,
@@ -162,12 +163,8 @@ class BEAM{}Model implements BEAMSerde {{
                         }
                     }
                     AlgType::DiscriminatedSum(discrimination) => {
-                        let (content, files) = self.generate_discriminated_sum_type(
-                            name,
-                            &doc_str,
-                            discrimination,
-                            depth,
-                        );
+                        let GeneratedCode { content, files } = self
+                            .generate_discriminated_sum_type(name, &doc_str, discrimination, depth);
                         ParsedIast {
                             content,
                             files,
@@ -178,7 +175,7 @@ class BEAM{}Model implements BEAMSerde {{
                         }
                     }
                     AlgType::Product(product) => {
-                        let (content, files) =
+                        let GeneratedCode { content, files } =
                             self.generate_product_type(name, &doc_str, product, depth);
                         ParsedIast {
                             content,
@@ -232,7 +229,10 @@ class BEAM{}Model implements BEAMSerde {{
                 };
                 match &annotated_obj.value {
                     intermediate::types::Primitive::Enum(allowed_values) => {
-                        let (class_name, content) = self.generate_primitive_sum_type(
+                        let EnumCode {
+                            class_name,
+                            content,
+                        } = self.generate_primitive_sum_type(
                             name,
                             &doc_str,
                             &allowed_values
@@ -360,7 +360,6 @@ class BEAM{}Model implements BEAMSerde {{
         }
     }
 
-    // return (content, files)
     fn generate_sum_type(
         &self,
         name: &str,
@@ -368,7 +367,7 @@ class BEAM{}Model implements BEAMSerde {{
         // (name, type)
         sum: &Vec<(String, intermediate::IAST)>,
         depth: usize,
-    ) -> (String, Vec<File>) {
+    ) -> GeneratedCode {
         let class_name = self.class_name(name);
         let mut file_dependencies = Vec::new();
         let mut sub_file_dependencies = Vec::new();
@@ -522,7 +521,10 @@ class BEAM{}Model implements BEAMSerde {{
             path: std::path::PathBuf::from(format!("{}/{}", name, f.path.display())),
             content: f.content,
         }));
-        (content, file_dependencies)
+        GeneratedCode {
+            content,
+            files: file_dependencies,
+        }
     }
 
     /// Generates a discriminated sum type (tagged union).
@@ -534,7 +536,7 @@ class BEAM{}Model implements BEAMSerde {{
         doc_str: &str,
         discrimination: &intermediate::types::Discrimination,
         depth: usize,
-    ) -> (String, Vec<File>) {
+    ) -> GeneratedCode {
         let class_name = self.class_name(name);
         let file_dependencies = Vec::new();
 
@@ -643,7 +645,10 @@ class BEAM{}Model implements BEAMSerde {{
             content.push_str("}\n\n");
         }
 
-        (content, file_dependencies)
+        GeneratedCode {
+            content,
+            files: file_dependencies,
+        }
     }
 
     /// this is an enum
@@ -654,7 +659,7 @@ class BEAM{}Model implements BEAMSerde {{
         doc_str: &str,
         // (allowed_value, is_string, description)
         allowed_values: &Vec<(&str, bool, &str)>,
-    ) -> (String, String) {
+    ) -> EnumCode {
         let class_name = format!("{}{}", self.class_prefix, sanitize(name));
         // (sanitized_value, enum_value, is_string, description)
         let allowed_values_str = allowed_values
@@ -714,7 +719,10 @@ class BEAM{}Model implements BEAMSerde {{
         ));
         content.push_str("  };\n");
         content.push_str("}\n");
-        (class_name, content)
+        EnumCode {
+            class_name,
+            content,
+        }
     }
 
     fn generate_product_type(
@@ -723,7 +731,7 @@ class BEAM{}Model implements BEAMSerde {{
         doc_str: &str,
         product: &HashMap<&str, intermediate::IAST>,
         depth: usize,
-    ) -> (String, Vec<File>) {
+    ) -> GeneratedCode {
         let class_name = self.class_name(name);
         let mut file_dependencies = Vec::new();
         let mut file_sub_dependencies = Vec::new();
@@ -742,7 +750,10 @@ class BEAM{}Model implements BEAMSerde {{
                 let (prim_type, prim_data) = match &prim.value {
                     intermediate::types::Primitive::Enum(allowed_values) => {
                         let full_name = format!("{}_{}", name, sanitized_p_name);
-                        let (class_name, content) = self.generate_primitive_sum_type(
+                        let EnumCode {
+                            class_name,
+                            content,
+                        } = self.generate_primitive_sum_type(
                             &full_name,
                             doc_str,
                             &allowed_values
@@ -1039,7 +1050,10 @@ class BEAM{}Model implements BEAMSerde {{
             path: std::path::PathBuf::from(format!("{}/{}", name, f.path.display())),
             content: f.content,
         }));
-        (content, file_dependencies)
+        GeneratedCode {
+            content,
+            files: file_dependencies,
+        }
     }
 }
 
@@ -1166,6 +1180,14 @@ pub(super) struct ParsedIast {
     pub nullable: bool,
     pub optional: bool,
     pub is_binary: bool,
+}
+
+/// Result of [`SchemeAdder::generate_primitive_sum_type`]: the generated
+/// Dart `enum` source together with the name of the enum class so callers
+/// can reference it.
+pub(super) struct EnumCode {
+    pub class_name: String,
+    pub content: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

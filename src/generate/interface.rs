@@ -12,3 +12,11 @@ pub struct File {
     pub path: std::path::PathBuf,
     pub content: String,
 }
+
+/// A chunk of generated Dart source together with the dependent files
+/// produced while generating it. Returned by the various `generate_*`
+/// helpers in the Dart backend.
+pub struct GeneratedCode {
+    pub content: String,
+    pub files: Vec<File>,
+}
