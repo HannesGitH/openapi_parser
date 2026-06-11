@@ -128,83 +128,6 @@ impl<'a> EndpointAdder<'a> {
         }));
     }
 
-    /// Parse a single response IAST, emit its schema file + import/export
-    /// lines (appended to `deps`/`imports_str`), and classify it into a
-    /// [`ResponseClass`] describing how the value should be decoded.
-    ///
-    /// Extracted so a future multi-response parser can call it per status
-    /// code and combine the results into a response union type.
-    fn process_response(
-        &self,
-        response_name: &str,
-        response_code: &str,
-        response: &intermediate::IAST,
-        name: &str,
-        method_str: &str,
-        depth: usize,
-        deps: &mut Vec<File>,
-        imports_str: &mut String,
-    ) -> ResponseClass {
-        let parsed = self
-            .scheme_adder
-            .parse_named_iast(response_name, response, depth + 1);
-        let dep_path_str = if response_code.is_empty() {
-            // Union of multiple responses: there is no single status code.
-            format!("{}/{}.resp.schema.dart", name, method_str)
-        } else {
-            format!("{}/{}.resp.{}.schema.dart", name, method_str, response_code)
-        };
-        let dep_path = std::path::PathBuf::from(&dep_path_str);
-        deps.push(File {
-            path: dep_path,
-            content: parsed.content,
-        });
-        deps.extend(parsed.files.into_iter().map(|f| File {
-            path: std::path::PathBuf::from(format!("{}/{}", name, f.path.to_str().unwrap())),
-            content: f.content,
-        }));
-        imports_str.push_str(&format!("import '{}';\n", &dep_path_str));
-        imports_str.push_str(&format!("export '{}';\n", &dep_path_str));
-        match parsed.special_case {
-            Some(schemes::GenerationSpecialCase { reason, type_name }) => ResponseClass {
-                type_str: type_name,
-                // Is the response value a raw primitive
-                // (no `.fromJson`) rather than a generated
-                // class? Three sub-cases:
-                //  - the IAST itself was primitive,
-                //  - it was a list whose elements were
-                //    flagged primitive,
-                //  - it was a link (`$ref`) whose target
-                //    transitively resolves to a primitive
-                //    typedef (e.g. `typedef Foo = String;`).
-                // The link case used to be a one-shot
-                // open-coded `iter().find` only one hop
-                // deep; it now goes through the shared
-                // resolver which follows ref chains and
-                // correctly classifies enums as non-primitive.
-                is_primitive: match &reason {
-                    GenerationSpecialCaseType::Primitive => true,
-                    GenerationSpecialCaseType::List(_, is_primitive) => *is_primitive,
-                    GenerationSpecialCaseType::Link(link) => {
-                        self.intermediate.resolve_ref(link).is_primitive()
-                    }
-                },
-                list_inner_type: if let GenerationSpecialCaseType::List(inner_type, _) = reason {
-                    Some(inner_type)
-                } else {
-                    None
-                },
-                is_binary: parsed.is_binary,
-            },
-            None => ResponseClass {
-                type_str: self.scheme_adder.class_name(response_name),
-                is_primitive: false,
-                list_inner_type: None,
-                is_binary: parsed.is_binary,
-            },
-        }
-    }
-
     fn generate_path_method_wrapper(
         &self,
         name: &str,
@@ -335,53 +258,97 @@ impl<'a> EndpointAdder<'a> {
                         list_inner_type: None,
                         is_binary: false,
                     }
-                } else if responses.len() == 1 {
-                    let response_name = format!("{}_{}Response", name, method_str);
-                    let (response_code, response) = responses.first_key_value().unwrap();
-                    self.process_response(
-                        &response_name,
-                        response_code,
-                        response,
-                        name,
-                        &method_str,
-                        depth,
-                        &mut deps,
-                        &mut imports_str,
-                    )
                 } else {
-                    // Multiple responses: union every status code into a single
-                    // synthetic sum-type IAST and parse that as one response
-                    // class, so the endpoint has a single, well-typed return
-                    // value (a sealed union the caller can switch on) instead
-                    // of a discarded class per code.
-                    let variants = responses
-                        .iter()
-                        .map(|(response_code, response)| intermediate::SumVariant {
-                            name: response_code.to_string(),
-                            typ: (*response).clone(),
-                        })
-                        .collect();
-                    let union = IAST::Object(intermediate::AnnotatedObj {
-                        nullable: false,
-                        optional: false,
-                        is_deprecated: false,
-                        description: None,
-                        title: None,
-                        value: intermediate::AlgType::Sum(variants),
-                    });
+                    let (response_code, response): (&str, IAST) = if responses.len() == 1 {
+                        let (code, resp) = responses.first_key_value().unwrap();
+                        (code.as_str(), (*resp).clone())
+                    } else {
+                        let variants = responses
+                            .iter()
+                            .map(|(code, resp)| intermediate::SumVariant {
+                                name: code.to_string(),
+                                typ: (*resp).clone(),
+                            })
+                            .collect();
+                        let union = IAST::Object(intermediate::AnnotatedObj {
+                            nullable: false,
+                            optional: false,
+                            is_deprecated: false,
+                            description: None,
+                            title: None,
+                            value: intermediate::AlgType::Sum(variants),
+                        });
+                        ("", union)
+                    };
+
+                    // Then, parse that IAST into the single response class:
+                    // emit its schema file + import/export lines and classify
+                    // it into a `ResponseClass` describing how to decode it.
                     let response_name = format!("{}_{}Response", name, method_str);
-                    self.process_response(
-                        &response_name,
-                        // No single status code drives the union; an empty code
-                        // yields the union schema file name.
-                        "",
-                        &union,
-                        name,
-                        &method_str,
-                        depth,
-                        &mut deps,
-                        &mut imports_str,
-                    )
+                    let parsed =
+                        self.scheme_adder
+                            .parse_named_iast(&response_name, &response, depth + 1);
+                    let dep_path_str = if response_code.is_empty() {
+                        format!("{}/{}.resp.schema.dart", name, method_str)
+                    } else {
+                        format!("{}/{}.resp.{}.schema.dart", name, method_str, response_code)
+                    };
+                    deps.push(File {
+                        path: std::path::PathBuf::from(&dep_path_str),
+                        content: parsed.content,
+                    });
+                    deps.extend(parsed.files.into_iter().map(|f| File {
+                        path: std::path::PathBuf::from(format!(
+                            "{}/{}",
+                            name,
+                            f.path.to_str().unwrap()
+                        )),
+                        content: f.content,
+                    }));
+                    imports_str.push_str(&format!("import '{}';\n", &dep_path_str));
+                    imports_str.push_str(&format!("export '{}';\n", &dep_path_str));
+                    match parsed.special_case {
+                        Some(schemes::GenerationSpecialCase { reason, type_name }) => {
+                            ResponseClass {
+                                type_str: type_name,
+                                // Is the response value a raw primitive (no
+                                // `.fromJson`) rather than a generated class?
+                                // Three sub-cases: the IAST itself was
+                                // primitive, it was a list whose elements were
+                                // flagged primitive, or it was a link (`$ref`)
+                                // whose target transitively resolves to a
+                                // primitive typedef (e.g. `typedef Foo =
+                                // String;`). The link case goes through the
+                                // shared resolver, which follows ref chains and
+                                // correctly classifies enums as non-primitive.
+                                is_primitive: match &reason {
+                                    GenerationSpecialCaseType::Primitive => true,
+                                    GenerationSpecialCaseType::List(_, is_primitive) => {
+                                        *is_primitive
+                                    }
+                                    GenerationSpecialCaseType::Link(link) => {
+                                        self.intermediate.resolve_ref(link).is_primitive()
+                                    }
+                                },
+                                list_inner_type: if let GenerationSpecialCaseType::List(
+                                    inner_type,
+                                    _,
+                                ) = reason
+                                {
+                                    Some(inner_type)
+                                } else {
+                                    None
+                                },
+                                is_binary: parsed.is_binary,
+                            }
+                        }
+                        None => ResponseClass {
+                            type_str: self.scheme_adder.class_name(&response_name),
+                            is_primitive: false,
+                            list_inner_type: None,
+                            is_binary: parsed.is_binary,
+                        },
+                    }
                 }
             };
             let impl_str = {
