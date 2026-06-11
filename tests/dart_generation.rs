@@ -1116,15 +1116,17 @@ fn endpoint_multiple_responses_generate_status_keyed_union() {
         "T match<T>({",
         "union must expose a match<T> dispatcher",
     );
+    // The match callback receives the unwrapped value (`t.value`), so its
+    // parameter is the arm's value type, not the wrapper subclass.
     assert_contains(
         union,
-        "required T Function(BEAM_usersMethods_getResponse_200Model_ value) code200,",
-        "match must take one callback per arm, keyed by the short name",
+        "required T Function(BEAMUserModel value) code200,",
+        "match callbacks take the unwrapped value type",
     );
     assert_contains(
         union,
-        "BEAM_usersMethods_getResponse_200Model_ t => code200(t),",
-        "match must dispatch each concrete arm to its callback",
+        "BEAM_usersMethods_getResponse_200Model_ t => code200(t.value),",
+        "match must dispatch each concrete arm by passing its unwrapped value",
     );
 }
 

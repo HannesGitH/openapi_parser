@@ -375,15 +375,15 @@ class BEAM{}Model implements BEAMSerde {{
             ));
         }
         s.push_str("\n\n\tT match<T>({");
-        for (short, subclass, _value_type) in variants {
+        for (short, _subclass, value_type) in variants {
             s.push_str(&format!(
                 "\n\t\trequired T Function({} value) {},",
-                subclass, short
+                value_type, short
             ));
         }
         s.push_str("\n\t}) => switch (this) {");
         for (short, subclass, _value_type) in variants {
-            s.push_str(&format!("\n\t\t{} t => {}(t),", subclass, short));
+            s.push_str(&format!("\n\t\t{} t => {}(t.value),", subclass, short));
         }
         s.push_str("\n\t};");
         s
