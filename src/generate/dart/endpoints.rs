@@ -128,6 +128,78 @@ impl<'a> EndpointAdder<'a> {
         }));
     }
 
+    /// Parse a single response IAST, emit its schema file + import/export
+    /// lines (appended to `deps`/`imports_str`), and classify it into a
+    /// [`ResponseClass`] describing how the value should be decoded.
+    ///
+    /// Extracted so a future multi-response parser can call it per status
+    /// code and combine the results into a response union type.
+    fn process_response(
+        &self,
+        response_name: &str,
+        response_code: &str,
+        response: &intermediate::IAST,
+        name: &str,
+        method_str: &str,
+        depth: usize,
+        deps: &mut Vec<File>,
+        imports_str: &mut String,
+    ) -> ResponseClass {
+        let parsed = self
+            .scheme_adder
+            .parse_named_iast(response_name, response, depth + 1);
+        let dep_path_str = format!("{}/{}.resp.{}.schema.dart", name, method_str, response_code);
+        let dep_path = std::path::PathBuf::from(&dep_path_str);
+        deps.push(File {
+            path: dep_path,
+            content: parsed.content,
+        });
+        deps.extend(parsed.files.into_iter().map(|f| File {
+            path: std::path::PathBuf::from(format!("{}/{}", name, f.path.to_str().unwrap())),
+            content: f.content,
+        }));
+        imports_str.push_str(&format!("import '{}';\n", &dep_path_str));
+        imports_str.push_str(&format!("export '{}';\n", &dep_path_str));
+        match parsed.special_case {
+            Some(schemes::GenerationSpecialCase { reason, type_name }) => ResponseClass {
+                type_str: type_name,
+                // Is the response value a raw primitive
+                // (no `.fromJson`) rather than a generated
+                // class? Three sub-cases:
+                //  - the IAST itself was primitive,
+                //  - it was a list whose elements were
+                //    flagged primitive,
+                //  - it was a link (`$ref`) whose target
+                //    transitively resolves to a primitive
+                //    typedef (e.g. `typedef Foo = String;`).
+                // The link case used to be a one-shot
+                // open-coded `iter().find` only one hop
+                // deep; it now goes through the shared
+                // resolver which follows ref chains and
+                // correctly classifies enums as non-primitive.
+                is_primitive: match &reason {
+                    GenerationSpecialCaseType::Primitive => true,
+                    GenerationSpecialCaseType::List(_, is_primitive) => *is_primitive,
+                    GenerationSpecialCaseType::Link(link) => {
+                        self.intermediate.resolve_ref(link).is_primitive()
+                    }
+                },
+                list_inner_type: if let GenerationSpecialCaseType::List(inner_type, _) = reason {
+                    Some(inner_type)
+                } else {
+                    None
+                },
+                is_binary: parsed.is_binary,
+            },
+            None => ResponseClass {
+                type_str: self.scheme_adder.class_name(response_name),
+                is_primitive: false,
+                list_inner_type: None,
+                is_binary: parsed.is_binary,
+            },
+        }
+    }
+
     fn generate_path_method_wrapper(
         &self,
         name: &str,
@@ -258,76 +330,33 @@ impl<'a> EndpointAdder<'a> {
                         list_inner_type: None,
                         is_binary: false,
                     }
-                } else {
+                } else if responses.len() == 1 {
                     let response_name = format!("{}_{}Response", name, method_str);
-                    //TODO: add parser for multiple responses
                     let (response_code, response) = responses.first_key_value().unwrap();
-                    let parsed =
-                        self.scheme_adder
-                            .parse_named_iast(&response_name, &response, depth + 1);
-                    let dep_path_str =
-                        format!("{}/{}.resp.{}.schema.dart", name, method_str, response_code);
-                    let dep_path = std::path::PathBuf::from(&dep_path_str);
-                    deps.push(File {
-                        path: dep_path,
-                        content: parsed.content,
-                    });
-                    deps.extend(parsed.files.into_iter().map(|f| File {
-                        path: std::path::PathBuf::from(format!(
-                            "{}/{}",
-                            name,
-                            f.path.to_str().unwrap()
-                        )),
-                        content: f.content,
-                    }));
-                    imports_str.push_str(&format!("import '{}';\n", &dep_path_str));
-                    imports_str.push_str(&format!("export '{}';\n", &dep_path_str));
-                    match parsed.special_case {
-                        Some(schemes::GenerationSpecialCase { reason, type_name }) => {
-                            ResponseClass {
-                                type_str: type_name,
-                                // Is the response value a raw primitive
-                                // (no `.fromJson`) rather than a generated
-                                // class? Three sub-cases:
-                                //  - the IAST itself was primitive,
-                                //  - it was a list whose elements were
-                                //    flagged primitive,
-                                //  - it was a link (`$ref`) whose target
-                                //    transitively resolves to a primitive
-                                //    typedef (e.g. `typedef Foo = String;`).
-                                // The link case used to be a one-shot
-                                // open-coded `iter().find` only one hop
-                                // deep; it now goes through the shared
-                                // resolver which follows ref chains and
-                                // correctly classifies enums as non-primitive.
-                                is_primitive: match &reason {
-                                    GenerationSpecialCaseType::Primitive => true,
-                                    GenerationSpecialCaseType::List(_, is_primitive) => {
-                                        *is_primitive
-                                    }
-                                    GenerationSpecialCaseType::Link(link) => {
-                                        self.intermediate.resolve_ref(link).is_primitive()
-                                    }
-                                },
-                                list_inner_type: if let GenerationSpecialCaseType::List(
-                                    inner_type,
-                                    _,
-                                ) = reason
-                                {
-                                    Some(inner_type)
-                                } else {
-                                    None
-                                },
-                                is_binary: parsed.is_binary,
-                            }
-                        }
-                        None => ResponseClass {
-                            type_str: self.scheme_adder.class_name(&response_name),
-                            is_primitive: false,
-                            list_inner_type: None,
-                            is_binary: parsed.is_binary,
-                        },
-                    }
+                    self.process_response(
+                        &response_name,
+                        response_code,
+                        response,
+                        name,
+                        &method_str,
+                        depth,
+                        &mut deps,
+                        &mut imports_str,
+                    )
+                } else {
+                    //TODO: add parser for multiple responses
+                    let response_name = format!("{}_{}Response", name, method_str);
+                    let (response_code, response) = responses.first_key_value().unwrap();
+                    self.process_response(
+                        &response_name,
+                        response_code,
+                        response,
+                        name,
+                        &method_str,
+                        depth,
+                        &mut deps,
+                        &mut imports_str,
+                    )
                 }
             };
             let impl_str = {
