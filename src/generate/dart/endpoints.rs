@@ -26,6 +26,23 @@ struct ParamsCode {
     as_json_body: String,
 }
 
+/// Classification of a request body, driving how it is serialized before
+/// being sent. `decl` is the Dart parameter declaration (e.g.
+/// ` {required Foo body}`) or `None` when the endpoint takes no body.
+struct BodyClass {
+    decl: Option<String>,
+    is_primitive: bool,
+    list_inner_type: Option<String>,
+}
+
+/// Classification of a response value, driving how it is decoded.
+struct ResponseClass {
+    type_str: String,
+    is_primitive: bool,
+    list_inner_type: Option<String>,
+    is_binary: bool,
+}
+
 #[macro_use]
 mod macros;
 pub struct EndpointAdder<'a> {
@@ -155,7 +172,7 @@ impl<'a> EndpointAdder<'a> {
         for method in &route.endpoints {
             let method_str = method.method.string();
             let param_name = format!("_P_{}", method_str);
-            let (body_str, body_is_primitive, body_list_inner_type) = match &method.request {
+            let body_class = match &method.request {
                 Some(request) => {
                     //do things
                     let request_name = format!("{}{}Request", name, method_str);
@@ -194,42 +211,42 @@ impl<'a> EndpointAdder<'a> {
                     // chain-following via the shared `resolve_ref`), so
                     // `List<Primitive>` and `List<$ref to primitive typedef>`
                     // both bucket as primitive.
-                    let body_type_str = match special_case {
-                        Some(schemes::GenerationSpecialCase { reason, type_name }) => {
-                            (
-                                type_name,
-                                match &reason {
-                                    GenerationSpecialCaseType::List(_, is_primitive) => {
-                                        *is_primitive
-                                    }
-                                    GenerationSpecialCaseType::Primitive => true,
-                                    // A link can point at a primitive
-                                    // typedef (e.g. `typedef Foo = String;`);
-                                    // in that case the body has no
-                                    // `.toJson()` and must be passed as raw
-                                    // JSON. Defer to the shared resolver so
-                                    // chains of refs are followed too.
-                                    GenerationSpecialCaseType::Link(link) => {
-                                        self.intermediate.resolve_ref(link).is_primitive()
-                                    }
-                                },
-                                match reason {
-                                    GenerationSpecialCaseType::List(inner_type, _) => {
-                                        Some(inner_type)
-                                    }
-                                    _ => None,
-                                },
-                            )
-                        }
-                        _ => (self.scheme_adder.class_name(&request_name), false, None),
-                    };
-                    (
-                        Some(format!(" {{required {} body}}", body_type_str.0)),
-                        body_type_str.1,
-                        body_type_str.2,
-                    )
+                    match special_case {
+                        Some(schemes::GenerationSpecialCase { reason, type_name }) => BodyClass {
+                            decl: Some(format!(" {{required {} body}}", type_name)),
+                            is_primitive: match &reason {
+                                GenerationSpecialCaseType::List(_, is_primitive) => *is_primitive,
+                                GenerationSpecialCaseType::Primitive => true,
+                                // A link can point at a primitive
+                                // typedef (e.g. `typedef Foo = String;`);
+                                // in that case the body has no
+                                // `.toJson()` and must be passed as raw
+                                // JSON. Defer to the shared resolver so
+                                // chains of refs are followed too.
+                                GenerationSpecialCaseType::Link(link) => {
+                                    self.intermediate.resolve_ref(link).is_primitive()
+                                }
+                            },
+                            list_inner_type: match reason {
+                                GenerationSpecialCaseType::List(inner_type, _) => Some(inner_type),
+                                _ => None,
+                            },
+                        },
+                        _ => BodyClass {
+                            decl: Some(format!(
+                                " {{required {} body}}",
+                                self.scheme_adder.class_name(&request_name)
+                            )),
+                            is_primitive: false,
+                            list_inner_type: None,
+                        },
+                    }
                 }
-                None => (None, true, None),
+                None => BodyClass {
+                    decl: None,
+                    is_primitive: true,
+                    list_inner_type: None,
+                },
             };
             let params_str = if method.params.is_empty() {
                 String::new()
@@ -241,10 +258,15 @@ impl<'a> EndpointAdder<'a> {
                 as_json_body: params_as_json_body_str,
             } = mk_params(&method.params, &param_name);
 
-            let (ret_type_str, ret_is_primitive, ret_list_inner_type, ret_is_binary) = {
+            let response_class = {
                 let responses = &method.responses;
                 if responses.is_empty() {
-                    ("()".to_string(), true, None, false)
+                    ResponseClass {
+                        type_str: "()".to_string(),
+                        is_primitive: true,
+                        list_inner_type: None,
+                        is_binary: false,
+                    }
                 } else {
                     let response_name = format!("{}_{}Response", name, method_str);
                     //TODO: add parser for multiple responses
@@ -276,42 +298,50 @@ impl<'a> EndpointAdder<'a> {
                     imports_str.push_str(&format!("import '{}';\n", &dep_path_str));
                     imports_str.push_str(&format!("export '{}';\n", &dep_path_str));
                     match special_case {
-                        Some(schemes::GenerationSpecialCase { reason, type_name }) => (
-                            type_name,
-                            // Is the response value a raw primitive
-                            // (no `.fromJson`) rather than a generated
-                            // class? Three sub-cases:
-                            //  - the IAST itself was primitive,
-                            //  - it was a list whose elements were
-                            //    flagged primitive,
-                            //  - it was a link (`$ref`) whose target
-                            //    transitively resolves to a primitive
-                            //    typedef (e.g. `typedef Foo = String;`).
-                            // The link case used to be a one-shot
-                            // open-coded `iter().find` only one hop
-                            // deep; it now goes through the shared
-                            // resolver which follows ref chains and
-                            // correctly classifies enums as non-primitive.
-                            match &reason {
-                                GenerationSpecialCaseType::Primitive => true,
-                                GenerationSpecialCaseType::List(_, is_primitive) => *is_primitive,
-                                GenerationSpecialCaseType::Link(link) => {
-                                    self.intermediate.resolve_ref(link).is_primitive()
-                                }
-                            },
-                            if let GenerationSpecialCaseType::List(inner_type, _) = reason {
-                                Some(inner_type)
-                            } else {
-                                None
-                            },
-                            ret_is_binary,
-                        ),
-                        None => (
-                            self.scheme_adder.class_name(&response_name),
-                            false,
-                            None,
-                            ret_is_binary,
-                        ),
+                        Some(schemes::GenerationSpecialCase { reason, type_name }) => {
+                            ResponseClass {
+                                type_str: type_name,
+                                // Is the response value a raw primitive
+                                // (no `.fromJson`) rather than a generated
+                                // class? Three sub-cases:
+                                //  - the IAST itself was primitive,
+                                //  - it was a list whose elements were
+                                //    flagged primitive,
+                                //  - it was a link (`$ref`) whose target
+                                //    transitively resolves to a primitive
+                                //    typedef (e.g. `typedef Foo = String;`).
+                                // The link case used to be a one-shot
+                                // open-coded `iter().find` only one hop
+                                // deep; it now goes through the shared
+                                // resolver which follows ref chains and
+                                // correctly classifies enums as non-primitive.
+                                is_primitive: match &reason {
+                                    GenerationSpecialCaseType::Primitive => true,
+                                    GenerationSpecialCaseType::List(_, is_primitive) => {
+                                        *is_primitive
+                                    }
+                                    GenerationSpecialCaseType::Link(link) => {
+                                        self.intermediate.resolve_ref(link).is_primitive()
+                                    }
+                                },
+                                list_inner_type: if let GenerationSpecialCaseType::List(
+                                    inner_type,
+                                    _,
+                                ) = reason
+                                {
+                                    Some(inner_type)
+                                } else {
+                                    None
+                                },
+                                is_binary: ret_is_binary,
+                            }
+                        }
+                        None => ResponseClass {
+                            type_str: self.scheme_adder.class_name(&response_name),
+                            is_primitive: false,
+                            list_inner_type: None,
+                            is_binary: ret_is_binary,
+                        },
                     }
                 }
             };
@@ -321,30 +351,33 @@ impl<'a> EndpointAdder<'a> {
                     "\n\t\t{}",
                     params_as_json_body_str.replace("\n", "\n\t\t")
                 ));
-                let body_emission: String =
-                    match (&body_str, body_is_primitive, &body_list_inner_type) {
-                        // No body: send `null`.
-                        (None, _, _) => "null".to_string(),
-                        // Primitive body (single primitive OR `List<Primitive>`):
-                        // send raw, no serialization step needed.
-                        (Some(_), true, _) => "body".to_string(),
-                        // Non-primitive list body (`List<Object>` /
-                        // `List<Enum>`): Dart's built-in `List` has no
-                        // `.toJson()`, so we must serialize element-by-element.
-                        (Some(_), false, Some(_)) => {
-                            "body?.map((e) => e.toJson()).toList()".to_string()
-                        }
-                        // Single non-primitive body: call .toJson() directly.
-                        (Some(_), false, None) => "body?.toJson()".to_string(),
-                    };
-                cpf!(s, "return handleCached(method: BEAMRequestMethod.{}, params: paramsJson, body: {}, expectedResponseType: {}).then((json) => {});", method_str, body_emission, match ret_is_binary {
+                let body_emission: String = match (
+                    &body_class.decl,
+                    body_class.is_primitive,
+                    &body_class.list_inner_type,
+                ) {
+                    // No body: send `null`.
+                    (None, _, _) => "null".to_string(),
+                    // Primitive body (single primitive OR `List<Primitive>`):
+                    // send raw, no serialization step needed.
+                    (Some(_), true, _) => "body".to_string(),
+                    // Non-primitive list body (`List<Object>` /
+                    // `List<Enum>`): Dart's built-in `List` has no
+                    // `.toJson()`, so we must serialize element-by-element.
+                    (Some(_), false, Some(_)) => {
+                        "body?.map((e) => e.toJson()).toList()".to_string()
+                    }
+                    // Single non-primitive body: call .toJson() directly.
+                    (Some(_), false, None) => "body?.toJson()".to_string(),
+                };
+                cpf!(s, "return handleCached(method: BEAMRequestMethod.{}, params: paramsJson, body: {}, expectedResponseType: {}).then((json) => {});", method_str, body_emission, match response_class.is_binary {
                     true => "BEAMExpectedResponseType.binary",
                     false => "BEAMExpectedResponseType.json",
-                }, match (ret_is_primitive, ret_list_inner_type) {
+                }, match (response_class.is_primitive, &response_class.list_inner_type) {
                     (true, None) => "json".to_string(),
                     (true, Some(inner_type)) => format!("json"),
                     (false, Some(inner_type)) => format!("(json as List).map((e) => {}.fromJson(e)).toList()", inner_type),
-                    (false, None) => format!("{}.fromJson(json)", ret_type_str),
+                    (false, None) => format!("{}.fromJson(json)", response_class.type_str),
                 });
                 s
             };
@@ -363,11 +396,11 @@ impl<'a> EndpointAdder<'a> {
             cpf!(
                 c,
                 "  BEAMCachedResponse<{}> {}({}{}){{{}\t}}",
-                ret_type_str,
+                response_class.type_str,
                 method_str,
                 params_str,
-                match &body_str {
-                    Some(body_str) => body_str,
+                match &body_class.decl {
+                    Some(decl) => decl,
                     None => "",
                 },
                 impl_str

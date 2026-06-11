@@ -318,13 +318,19 @@ fn parse_object<'a>(
     let parse_prim_type = |typ: &SchemaType| {
         // enum_values will be a vector with the possible values, each with a an additional bool, indicating weather it is a string (true) or a native type (false)
         let enum_values = if let Some(const_value) = &object.const_value {
-            Some(vec![(const_value.to_string(), const_value.is_string())])
+            Some(vec![EnumValue {
+                value: const_value.to_string(),
+                is_string: const_value.is_string(),
+            }])
         } else if !object.enum_values.is_empty() {
             Some(
                 object
                     .enum_values
                     .iter()
-                    .map(|v| (v.to_string().trim_matches('"').to_string(), v.is_string()))
+                    .map(|v| EnumValue {
+                        value: v.to_string().trim_matches('"').to_string(),
+                        is_string: v.is_string(),
+                    })
                     .collect(),
             )
         } else {
@@ -335,7 +341,10 @@ fn parse_object<'a>(
                 object.extensions.get("allow-unspecified-values")
             {
                 // our parser checks for unspecified, so add it
-                enum_values.push(("unspecified".to_string(), true));
+                enum_values.push(EnumValue {
+                    value: "unspecified".to_string(),
+                    is_string: true,
+                });
             }
             return Primitive::Enum(enum_values);
         }

@@ -255,6 +255,15 @@ pub struct SumVariant<'a> {
     pub typ: IAST<'a>,
 }
 
+/// A single permitted value of a [`Primitive::Enum`]. `is_string` records
+/// whether the value was a JSON string (and so must be emitted quoted in
+/// the generated Dart) rather than a native value.
+#[derive(Debug, PartialEq, Eq)]
+pub struct EnumValue {
+    pub value: String,
+    pub is_string: bool,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Primitive<'a> {
     String,
@@ -264,8 +273,7 @@ pub enum Primitive<'a> {
     Never,
     List(Box<IAST<'a>>),
     Map(Box<IAST<'a>>),
-    // each (value, is_string), is_string
-    Enum(Vec<(String, bool)>),
+    Enum(Vec<EnumValue>),
     Dynamic,
     Binary,
 }

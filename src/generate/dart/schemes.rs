@@ -238,8 +238,8 @@ class BEAM{}Model implements BEAMSerde {{
                             &allowed_values
                                 .iter()
                                 .map(|v| AllowedValue {
-                                    value: v.0.as_str(),
-                                    is_string: v.1,
+                                    value: v.value.as_str(),
+                                    is_string: v.is_string,
                                     description: empty_str.as_str(),
                                 })
                                 .collect::<Vec<_>>(),
@@ -390,7 +390,6 @@ class BEAM{}Model implements BEAMSerde {{
                 content,
                 files: depends_on_files,
                 special_case: not_built,
-                nullable,
                 ..
             } = self.parse_named_iast(&variant_name, iast, depth + 1);
             if let Some(GenerationSpecialCase {
@@ -404,7 +403,10 @@ class BEAM{}Model implements BEAMSerde {{
                 path: std::path::PathBuf::from(format!("{}/{}.dart", name, sanitized_inner_name)),
                 content,
             });
-            variants.push((self.class_name(&variant_name), not_built, nullable));
+            variants.push(SumVariantClass {
+                class_name: self.class_name(&variant_name),
+                special_case: not_built,
+            });
             for f in depends_on_files.into_iter() {
                 sub_file_dependencies.push(f);
             }
@@ -438,10 +440,10 @@ class BEAM{}Model implements BEAMSerde {{
             "\n\tfactory {}.fromJson(dynamic json) {{\n\t\tfinal errors = <String,Object>{{}};",
             class_name
         ));
-        for (v, _, variant_nullable) in variants.iter() {
+        for variant in variants.iter() {
             content.push_str(&format!(
                 "\n\t\ttry{{\n\t\t\treturn {}_.fromJson(json);\n\t\t}} catch(e) {{errors['{}']=e;}}",
-                v, v
+                variant.class_name, variant.class_name
             ));
         }
         content.push_str(&format!(
@@ -450,16 +452,20 @@ class BEAM{}Model implements BEAMSerde {{
 
         content.push_str("\n}\n\n");
 
-        for (v, not_built, variant_nullable) in variants.iter() {
+        for variant in variants.iter() {
+            let not_built = &variant.special_case;
             let value_type_name = match not_built {
                 Some(GenerationSpecialCase {
                     type_name: _,
                     reason: GenerationSpecialCaseType::Link(internal_type_name),
                 }) => &self.class_name(internal_type_name),
-                _ => v,
+                _ => &variant.class_name,
             };
 
-            content.push_str(&format!("class {}_ extends {} {{\n", v, class_name));
+            content.push_str(&format!(
+                "class {}_ extends {} {{\n",
+                variant.class_name, class_name
+            ));
             content.push_str(&format!(
                 "  {}{} value;\n",
                 if self.vars_should_be_final {
@@ -476,7 +482,7 @@ class BEAM{}Model implements BEAMSerde {{
                 } else {
                     ""
                 },
-                v
+                variant.class_name
             ));
             content.push_str(&format!(
                 "\n  @override\n  dynamic toJson() => {};\n",
@@ -499,8 +505,8 @@ class BEAM{}Model implements BEAMSerde {{
             ));
             content.push_str(&format!(
                 "  factory {}_.fromJson(dynamic json) => \n\t\t{}_({});\n",
-                v,
-                v,
+                variant.class_name,
+                variant.class_name,
                 match not_built {
                     Some(GenerationSpecialCase {
                         reason: GenerationSpecialCaseType::Primitive,
@@ -548,18 +554,15 @@ class BEAM{}Model implements BEAMSerde {{
         let file_dependencies = Vec::new();
 
         // Build variants from discrimination map
-        // (variant_class_name, discriminator_value, referenced_type_name)
-        let mut variants: Vec<(String, &str, String)> = Vec::new();
+        let mut variants: Vec<DiscriminatedVariant> = Vec::new();
 
         for (discriminator_value, annotated_ref) in discrimination.map.iter() {
             let trimmed_link = sanitize(strip_ref_prefix(annotated_ref.path));
-            let variant_class_name = self.class_name(&format!("{}{}", name, trimmed_link));
-            let referenced_type_name = self.class_name(&trimmed_link);
-            variants.push((
-                variant_class_name,
+            variants.push(DiscriminatedVariant {
+                class_name: self.class_name(&format!("{}{}", name, trimmed_link)),
                 discriminator_value,
-                referenced_type_name,
-            ));
+                referenced_type_name: self.class_name(&trimmed_link),
+            });
         }
 
         let mut content = String::new();
@@ -570,7 +573,8 @@ class BEAM{}Model implements BEAMSerde {{
         ));
 
         // Import all referenced types
-        for (_, _, referenced_type_name) in variants.iter() {
+        for variant in variants.iter() {
+            let referenced_type_name = &variant.referenced_type_name;
             let trimmed = referenced_type_name
                 .strip_prefix(self.class_prefix)
                 .unwrap_or(referenced_type_name)
@@ -607,10 +611,10 @@ class BEAM{}Model implements BEAMSerde {{
         ));
         content.push_str("\t\treturn switch(discriminator) {\n");
 
-        for (variant_class_name, discriminator_value, referenced_type_name) in variants.iter() {
+        for variant in variants.iter() {
             content.push_str(&format!(
                 "\t\t\t'{}' => {}_({}.fromJson(json)),\n",
-                discriminator_value, variant_class_name, referenced_type_name
+                variant.discriminator_value, variant.class_name, variant.referenced_type_name
             ));
         }
 
@@ -624,10 +628,10 @@ class BEAM{}Model implements BEAMSerde {{
         content.push_str("}\n\n");
 
         // Generate variant classes
-        for (variant_class_name, _, referenced_type_name) in variants.iter() {
+        for variant in variants.iter() {
             content.push_str(&format!(
                 "class {}_ extends {} {{\n",
-                variant_class_name, class_name
+                variant.class_name, class_name
             ));
             content.push_str(&format!(
                 "  {}{} value;\n",
@@ -636,7 +640,7 @@ class BEAM{}Model implements BEAMSerde {{
                 } else {
                     ""
                 },
-                referenced_type_name
+                variant.referenced_type_name
             ));
             content.push_str(&format!(
                 "  {}{}_({} this.value);\n",
@@ -645,8 +649,8 @@ class BEAM{}Model implements BEAMSerde {{
                 } else {
                     ""
                 },
-                variant_class_name,
-                referenced_type_name
+                variant.class_name,
+                variant.referenced_type_name
             ));
             content.push_str("\n  @override\n  dynamic toJson() => value.toJson();\n");
             content.push_str("}\n\n");
@@ -765,8 +769,8 @@ class BEAM{}Model implements BEAMSerde {{
                             &allowed_values
                                 .iter()
                                 .map(|v| AllowedValue {
-                                    value: v.0.as_str(),
-                                    is_string: v.1,
+                                    value: v.value.as_str(),
+                                    is_string: v.is_string,
                                     description: empty_str.as_str(),
                                 })
                                 .collect::<Vec<_>>(),
@@ -1207,6 +1211,25 @@ pub(super) struct AllowedValue<'a> {
     pub value: &'a str,
     pub is_string: bool,
     pub description: &'a str,
+}
+
+/// One arm of a discriminated union built by
+/// [`SchemeAdder::generate_discriminated_sum_type`]: the generated wrapper
+/// `class_name`, the `discriminator_value` that selects it, and the
+/// `referenced_type_name` it wraps.
+struct DiscriminatedVariant<'a> {
+    class_name: String,
+    discriminator_value: &'a str,
+    referenced_type_name: String,
+}
+
+/// One arm of a (non-discriminated) union built by
+/// [`SchemeAdder::generate_sum_type`]: the generated wrapper `class_name`
+/// and its `special_case` classification (link / list / primitive), used
+/// to decide how each variant is (de)serialized.
+struct SumVariantClass {
+    class_name: String,
+    special_case: Option<GenerationSpecialCase>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
