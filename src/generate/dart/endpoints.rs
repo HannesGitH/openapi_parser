@@ -57,8 +57,12 @@ impl<'a> EndpointAdder<'a> {
                 .routes
                 .iter()
                 // we always have a string path, so we can always use true here (i guess)
-                .map(|r| (r.path, true, r.description.unwrap_or("")))
-                .collect::<Vec<(&str, bool, &str)>>(),
+                .map(|r| schemes::AllowedValue {
+                    value: r.path,
+                    is_string: true,
+                    description: r.description.unwrap_or(""),
+                })
+                .collect::<Vec<_>>(),
         );
 
         for route in &intermediate.routes {
@@ -76,11 +80,7 @@ impl<'a> EndpointAdder<'a> {
             }));
         }
 
-        let GeneratedFragment {
-            class_name: frag_class_name,
-            content: frag_content,
-            files: frag_deps,
-        } = self.generate_route_fragment(
+        let frag = self.generate_route_fragment(
             "root",
             &intermediate.routes_tree,
             &intermediate.routes,
@@ -90,9 +90,9 @@ impl<'a> EndpointAdder<'a> {
         let root_frag_file_name = "root_fragment.dart";
         out_files.push(File {
             path: std::path::PathBuf::from(root_frag_file_name),
-            content: frag_content,
+            content: frag.content,
         });
-        out_files.extend(frag_deps);
+        out_files.extend(frag.files);
 
         let mut imports_content = String::new();
         imports_content.push_str(&include_str!("endpoints/imports.dart"));

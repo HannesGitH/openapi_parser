@@ -454,19 +454,19 @@ fn parse_object<'a>(
                 .enumerate()
                 .map(
                     |(idx, schema)| match parse_schema(ctx, schema, false, nullable) {
-                        Ok(obj) => Ok((
-                            match &obj {
+                        Ok(obj) => Ok(types::SumVariant {
+                            name: match &obj {
                                 IAST::Reference(refe) => strip_ref_prefix(refe.path).to_string(),
                                 _ => idx.to_string(),
                             },
-                            obj,
-                        )),
+                            typ: obj,
+                        }),
                         Err(e) => {
                             return Err(e);
                         }
                     },
                 )
-                .collect::<Result<Vec<(_, _)>, _>>()
+                .collect::<Result<Vec<_>, _>>()
             {
                 Ok(types) => match discrimination {
                     Some(discrimination) => AlgType::DiscriminatedSum(discrimination),

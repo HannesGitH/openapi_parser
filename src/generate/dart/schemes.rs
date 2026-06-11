@@ -237,8 +237,12 @@ class BEAM{}Model implements BEAMSerde {{
                             &doc_str,
                             &allowed_values
                                 .iter()
-                                .map(|v| (v.0.as_str(), v.1, empty_str.as_str()))
-                                .collect::<Vec<(_, _, _)>>(),
+                                .map(|v| AllowedValue {
+                                    value: v.0.as_str(),
+                                    is_string: v.1,
+                                    description: empty_str.as_str(),
+                                })
+                                .collect::<Vec<_>>(),
                         );
                         let mut ret = String::new();
                         ret.push_str(&mk_type_def(name, &class_name, false));
@@ -364,8 +368,7 @@ class BEAM{}Model implements BEAMSerde {{
         &self,
         name: &str,
         doc_str: &str,
-        // (name, type)
-        sum: &Vec<(String, intermediate::IAST)>,
+        sum: &[intermediate::types::SumVariant],
         depth: usize,
     ) -> GeneratedCode {
         let class_name = self.class_name(name);
@@ -376,7 +379,11 @@ class BEAM{}Model implements BEAMSerde {{
 
         let mut variants = Vec::new();
 
-        for (union_inner_name, iast) in sum.iter() {
+        for intermediate::types::SumVariant {
+            name: union_inner_name,
+            typ: iast,
+        } in sum.iter()
+        {
             let sanitized_inner_name = sanitize(union_inner_name);
             let mut variant_name = index_to_name(&sanitized_inner_name);
             let ParsedIast {
@@ -657,14 +664,13 @@ class BEAM{}Model implements BEAMSerde {{
         &self,
         name: &str,
         doc_str: &str,
-        // (allowed_value, is_string, description)
-        allowed_values: &Vec<(&str, bool, &str)>,
+        allowed_values: &[AllowedValue],
     ) -> EnumCode {
         let class_name = format!("{}{}", self.class_prefix, sanitize(name));
         // (sanitized_value, enum_value, is_string, description)
         let allowed_values_str = allowed_values
             .iter()
-            .map(|v| (&v.0, sanitize(v.0), v.1, &v.2))
+            .map(|v| (&v.value, sanitize(v.value), v.is_string, &v.description))
             .collect::<Vec<(_, _, _, _)>>();
         let mut content = String::new();
         content.push_str(&format!(
@@ -758,8 +764,12 @@ class BEAM{}Model implements BEAMSerde {{
                             doc_str,
                             &allowed_values
                                 .iter()
-                                .map(|v| (v.0.as_str(), v.1, empty_str.as_str()))
-                                .collect::<Vec<(_, _, _)>>(),
+                                .map(|v| AllowedValue {
+                                    value: v.0.as_str(),
+                                    is_string: v.1,
+                                    description: empty_str.as_str(),
+                                })
+                                .collect::<Vec<_>>(),
                         );
                         extra_content.push_str(&content);
                         (class_name, PropertyType::Normal)
@@ -1188,6 +1198,15 @@ pub(super) struct ParsedIast {
 pub(super) struct EnumCode {
     pub class_name: String,
     pub content: String,
+}
+
+/// A single permitted value of an enum, as consumed by
+/// [`SchemeAdder::generate_primitive_sum_type`]. `is_string` controls
+/// whether the value is emitted quoted in the generated Dart.
+pub(super) struct AllowedValue<'a> {
+    pub value: &'a str,
+    pub is_string: bool,
+    pub description: &'a str,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

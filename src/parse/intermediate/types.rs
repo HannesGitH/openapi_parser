@@ -240,11 +240,19 @@ pub enum IAST<'a> {
 /// Algebraic Type
 #[derive(Debug, PartialEq, Eq)]
 pub enum AlgType<'a> {
-    // name -> type
-    Sum(Vec<(String, IAST<'a>)>),
+    Sum(Vec<SumVariant<'a>>),
     // basically the same as a sum type, but can only have references
     DiscriminatedSum(Discrimination<'a>),
     Product(HashMap<&'a str, IAST<'a>>),
+}
+
+/// A single variant of a [`AlgType::Sum`] union: the variant `name`
+/// (either the referenced scheme name or the positional index) and the
+/// `typ` it resolves to.
+#[derive(Debug, PartialEq, Eq)]
+pub struct SumVariant<'a> {
+    pub name: String,
+    pub typ: IAST<'a>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
