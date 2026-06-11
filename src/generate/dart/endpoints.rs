@@ -5,7 +5,7 @@ use crate::{
         },
         File, GeneratedCode,
     },
-    parse::intermediate::{self, Route, RouteFragmentLeafData},
+    parse::intermediate::{self, Route, RouteFragmentLeafData, IAST},
 };
 
 use super::schemes;
@@ -148,7 +148,12 @@ impl<'a> EndpointAdder<'a> {
         let parsed = self
             .scheme_adder
             .parse_named_iast(response_name, response, depth + 1);
-        let dep_path_str = format!("{}/{}.resp.{}.schema.dart", name, method_str, response_code);
+        let dep_path_str = if response_code.is_empty() {
+            // Union of multiple responses: there is no single status code.
+            format!("{}/{}.resp.schema.dart", name, method_str)
+        } else {
+            format!("{}/{}.resp.{}.schema.dart", name, method_str, response_code)
+        };
         let dep_path = std::path::PathBuf::from(&dep_path_str);
         deps.push(File {
             path: dep_path,
@@ -344,13 +349,33 @@ impl<'a> EndpointAdder<'a> {
                         &mut imports_str,
                     )
                 } else {
-                    //TODO: add parser for multiple responses
+                    // Multiple responses: union every status code into a single
+                    // synthetic sum-type IAST and parse that as one response
+                    // class, so the endpoint has a single, well-typed return
+                    // value (a sealed union the caller can switch on) instead
+                    // of a discarded class per code.
+                    let variants = responses
+                        .iter()
+                        .map(|(response_code, response)| intermediate::SumVariant {
+                            name: response_code.to_string(),
+                            typ: (*response).clone(),
+                        })
+                        .collect();
+                    let union = IAST::Object(intermediate::AnnotatedObj {
+                        nullable: false,
+                        optional: false,
+                        is_deprecated: false,
+                        description: None,
+                        title: None,
+                        value: intermediate::AlgType::Sum(variants),
+                    });
                     let response_name = format!("{}_{}Response", name, method_str);
-                    let (response_code, response) = responses.first_key_value().unwrap();
                     self.process_response(
                         &response_name,
-                        response_code,
-                        response,
+                        // No single status code drives the union; an empty code
+                        // yields the union schema file name.
+                        "",
+                        &union,
                         name,
                         &method_str,
                         depth,

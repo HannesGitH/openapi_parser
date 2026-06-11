@@ -911,3 +911,82 @@ fn all_of_nullable_ref_generates_named_reference_property() {
         "must NOT inline the nullable ref into Outer_p:\n{outer}"
     );
 }
+
+/// An endpoint with MORE THAN ONE response status code must expose a single,
+/// well-typed return value: a sealed union of every response, parsed as one
+/// response class. Previously the generator looped over the responses,
+/// generated a throwaway class per code, and returned `()` — so callers lost
+/// the response type entirely.
+#[test]
+fn endpoint_multiple_responses_generate_single_union_response() {
+    let spec = r##"{
+        "openapi": "3.1.0",
+        "info": { "title": "t", "version": "0" },
+        "components": {
+            "schemas": {
+                "User": {
+                    "type": "object",
+                    "properties": { "name": { "type": "string" } },
+                    "required": ["name"]
+                }
+            }
+        },
+        "paths": {
+            "/users": {
+                "get": {
+                    "responses": {
+                        "200": {
+                            "description": "",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/User" }
+                                }
+                            }
+                        },
+                        "404": {
+                            "description": "",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": { "message": { "type": "string" } },
+                                        "required": ["message"]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }"##;
+    let files = generate(spec);
+    let route = file(&files, "endpoints/routes/_users.dart");
+
+    // The endpoint must NOT throw away the response type by returning `()`.
+    assert_not_contains(
+        route,
+        "BEAMCachedResponse<()>",
+        "multi-response endpoint must return a typed union, not ()",
+    );
+    // It returns the single generated union response type, decoded via
+    // `.fromJson` on the combined `json` payload.
+    assert_contains(
+        route,
+        ".fromJson(json)",
+        "multi-response endpoint must decode the union via .fromJson",
+    );
+
+    // The union itself is generated as one sealed class file (not one file
+    // per status code).
+    let union = files
+        .iter()
+        .find(|(path, _)| path.ends_with("get.resp.schema.dart"))
+        .map(|(_, content)| content.as_str())
+        .expect("a single union response schema file must be generated");
+    assert_contains(
+        union,
+        "sealed class",
+        "the unioned response must be a sealed class the caller can switch on",
+    );
+}
