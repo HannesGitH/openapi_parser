@@ -5,7 +5,7 @@ use crate::{
         },
         File, GeneratedCode,
     },
-    parse::intermediate::{self, Route, RouteFragmentLeafData, IAST},
+    parse::intermediate::{self, Route, RouteFragmentLeafData},
 };
 
 use super::schemes;
@@ -41,6 +41,12 @@ struct ResponseClass {
     is_primitive: bool,
     list_inner_type: Option<String>,
     is_binary: bool,
+    /// True when `type_str` is a multi-status [`BeamStatusCodeResponse`]
+    /// union exposing a `static fromCode(int, json)` factory. The endpoint
+    /// then threads the (optional) HTTP status code through the handler and
+    /// decodes via `fromCode`, falling back to `fromJson` when no status
+    /// code is available.
+    is_status_code_union: bool,
 }
 
 #[macro_use]
@@ -126,6 +132,73 @@ impl<'a> EndpointAdder<'a> {
             path: std::path::PathBuf::from(format!("endpoints/{}", f.path.to_str().unwrap())),
             content: f.content,
         }));
+    }
+
+    /// Parse a single response IAST into its own
+    /// `{name}/{method}.resp.{code}.schema.dart` schema file (plus any
+    /// nested sub-files), appending them to `deps`, and classify the result
+    /// into a [`ResponseClass`] describing how the value is decoded.
+    ///
+    /// This does NOT touch the route-level import string: callers decide
+    /// whether the route imports the per-code file directly (single
+    /// response) or imports the union that re-exports it (multiple
+    /// responses).
+    fn emit_response_schema(
+        &self,
+        response_name: &str,
+        code: &str,
+        response: &intermediate::IAST,
+        name: &str,
+        method_str: &str,
+        depth: usize,
+        deps: &mut Vec<File>,
+    ) -> ResponseClass {
+        let parsed = self
+            .scheme_adder
+            .parse_named_iast(response_name, response, depth + 1);
+        let dep_path_str = format!("{}/{}.resp.{}.schema.dart", name, method_str, code);
+        deps.push(File {
+            path: std::path::PathBuf::from(&dep_path_str),
+            content: parsed.content,
+        });
+        deps.extend(parsed.files.into_iter().map(|f| File {
+            path: std::path::PathBuf::from(format!("{}/{}", name, f.path.to_str().unwrap())),
+            content: f.content,
+        }));
+        match parsed.special_case {
+            Some(schemes::GenerationSpecialCase { reason, type_name }) => ResponseClass {
+                type_str: type_name,
+                // Is the response value a raw primitive (no `.fromJson`)
+                // rather than a generated class? Three sub-cases: the IAST
+                // itself was primitive, it was a list whose elements were
+                // flagged primitive, or it was a link (`$ref`) whose target
+                // transitively resolves to a primitive typedef (e.g.
+                // `typedef Foo = String;`). The link case goes through the
+                // shared resolver, which follows ref chains and correctly
+                // classifies enums as non-primitive.
+                is_primitive: match &reason {
+                    GenerationSpecialCaseType::Primitive => true,
+                    GenerationSpecialCaseType::List(_, is_primitive) => *is_primitive,
+                    GenerationSpecialCaseType::Link(link) => {
+                        self.intermediate.resolve_ref(link).is_primitive()
+                    }
+                },
+                list_inner_type: if let GenerationSpecialCaseType::List(inner_type, _) = reason {
+                    Some(inner_type)
+                } else {
+                    None
+                },
+                is_binary: parsed.is_binary,
+                is_status_code_union: false,
+            },
+            None => ResponseClass {
+                type_str: self.scheme_adder.class_name(response_name),
+                is_primitive: false,
+                list_inner_type: None,
+                is_binary: parsed.is_binary,
+                is_status_code_union: false,
+            },
+        }
     }
 
     fn generate_path_method_wrapper(
@@ -257,97 +330,75 @@ impl<'a> EndpointAdder<'a> {
                         is_primitive: true,
                         list_inner_type: None,
                         is_binary: false,
+                        is_status_code_union: false,
                     }
-                } else {
-                    let (response_code, response): (&str, IAST) = if responses.len() == 1 {
-                        let (code, resp) = responses.first_key_value().unwrap();
-                        (code.as_str(), (*resp).clone())
-                    } else {
-                        let variants = responses
-                            .iter()
-                            .map(|(code, resp)| intermediate::SumVariant {
-                                name: code.to_string(),
-                                typ: (*resp).clone(),
-                            })
-                            .collect();
-                        let union = IAST::Object(intermediate::AnnotatedObj {
-                            nullable: false,
-                            optional: false,
-                            is_deprecated: false,
-                            description: None,
-                            title: None,
-                            value: intermediate::AlgType::Sum(variants),
-                        });
-                        ("", union)
-                    };
-
-                    // Then, parse that IAST into the single response class:
-                    // emit its schema file + import/export lines and classify
-                    // it into a `ResponseClass` describing how to decode it.
+                } else if responses.len() == 1 {
+                    // Single response: parse it into its own
+                    // `{method}.resp.{code}.schema.dart` and return that type
+                    // directly — no union wrapper is needed.
+                    let (code, response) = responses.first_key_value().unwrap();
                     let response_name = format!("{}_{}Response", name, method_str);
-                    let parsed =
-                        self.scheme_adder
-                            .parse_named_iast(&response_name, &response, depth + 1);
-                    let dep_path_str = if response_code.is_empty() {
-                        format!("{}/{}.resp.schema.dart", name, method_str)
-                    } else {
-                        format!("{}/{}.resp.{}.schema.dart", name, method_str, response_code)
-                    };
-                    deps.push(File {
-                        path: std::path::PathBuf::from(&dep_path_str),
-                        content: parsed.content,
-                    });
-                    deps.extend(parsed.files.into_iter().map(|f| File {
-                        path: std::path::PathBuf::from(format!(
-                            "{}/{}",
-                            name,
-                            f.path.to_str().unwrap()
-                        )),
-                        content: f.content,
-                    }));
+                    let response_class = self.emit_response_schema(
+                        &response_name,
+                        code,
+                        response,
+                        name,
+                        &method_str,
+                        depth,
+                        &mut deps,
+                    );
+                    let dep_path_str = format!("{}/{}.resp.{}.schema.dart", name, method_str, code);
                     imports_str.push_str(&format!("import '{}';\n", &dep_path_str));
                     imports_str.push_str(&format!("export '{}';\n", &dep_path_str));
-                    match parsed.special_case {
-                        Some(schemes::GenerationSpecialCase { reason, type_name }) => {
-                            ResponseClass {
-                                type_str: type_name,
-                                // Is the response value a raw primitive (no
-                                // `.fromJson`) rather than a generated class?
-                                // Three sub-cases: the IAST itself was
-                                // primitive, it was a list whose elements were
-                                // flagged primitive, or it was a link (`$ref`)
-                                // whose target transitively resolves to a
-                                // primitive typedef (e.g. `typedef Foo =
-                                // String;`). The link case goes through the
-                                // shared resolver, which follows ref chains and
-                                // correctly classifies enums as non-primitive.
-                                is_primitive: match &reason {
-                                    GenerationSpecialCaseType::Primitive => true,
-                                    GenerationSpecialCaseType::List(_, is_primitive) => {
-                                        *is_primitive
-                                    }
-                                    GenerationSpecialCaseType::Link(link) => {
-                                        self.intermediate.resolve_ref(link).is_primitive()
-                                    }
-                                },
-                                list_inner_type: if let GenerationSpecialCaseType::List(
-                                    inner_type,
-                                    _,
-                                ) = reason
-                                {
-                                    Some(inner_type)
-                                } else {
-                                    None
-                                },
-                                is_binary: parsed.is_binary,
-                            }
-                        }
-                        None => ResponseClass {
-                            type_str: self.scheme_adder.class_name(&response_name),
-                            is_primitive: false,
-                            list_inner_type: None,
-                            is_binary: parsed.is_binary,
-                        },
+                    response_class
+                } else {
+                    // Multiple responses: parse each status code into its own
+                    // `{method}.resp.{code}.schema.dart` + `{name}_{method}_
+                    // {code}Response` class, then generate one "super" union
+                    // over them. Keying the union arms by status code (rather
+                    // than by resolved schema name) means codes that share a
+                    // schema — e.g. several error codes pointing at one error
+                    // model — stay distinct instead of colliding.
+                    let super_name = format!("{}_{}Response", name, method_str);
+                    let mut variants = Vec::with_capacity(responses.len());
+                    for (code, response) in responses.iter() {
+                        let response_name = format!("{}_{}_{}Response", name, method_str, code);
+                        let rc = self.emit_response_schema(
+                            &response_name,
+                            code,
+                            response,
+                            name,
+                            &method_str,
+                            depth,
+                            &mut deps,
+                        );
+                        variants.push(schemes::ResponseUnionVariant {
+                            code: code.to_string(),
+                            value_type: rc.type_str,
+                            is_primitive: rc.is_primitive,
+                            list_inner_type: rc.list_inner_type,
+                            // Sibling of the union file in the same directory.
+                            import_path: format!("{}.resp.{}.schema.dart", method_str, code),
+                        });
+                    }
+                    let union_content = self.scheme_adder.generate_response_union(
+                        &super_name,
+                        &variants,
+                        depth + 1,
+                    );
+                    let union_path = format!("{}/{}.resp.schema.dart", name, method_str);
+                    deps.push(File {
+                        path: std::path::PathBuf::from(&union_path),
+                        content: union_content,
+                    });
+                    imports_str.push_str(&format!("import '{}';\n", &union_path));
+                    imports_str.push_str(&format!("export '{}';\n", &union_path));
+                    ResponseClass {
+                        type_str: self.scheme_adder.class_name(&super_name),
+                        is_primitive: false,
+                        list_inner_type: None,
+                        is_binary: false,
+                        is_status_code_union: true,
                     }
                 }
             };
@@ -376,15 +427,33 @@ impl<'a> EndpointAdder<'a> {
                     // Single non-primitive body: call .toJson() directly.
                     (Some(_), false, None) => "body?.toJson()".to_string(),
                 };
-                cpf!(s, "return handleCached(method: BEAMRequestMethod.{}, params: paramsJson, body: {}, expectedResponseType: {}).then((json) => {});", method_str, body_emission, match response_class.is_binary {
+                let expected_response_type = match response_class.is_binary {
                     true => "BEAMExpectedResponseType.binary",
                     false => "BEAMExpectedResponseType.json",
-                }, match (response_class.is_primitive, &response_class.list_inner_type) {
-                    (true, None) => "json".to_string(),
-                    (true, Some(_)) => format!("json"),
-                    (false, Some(inner_type)) => format!("(json as List).map((e) => {}.fromJson(e)).toList()", inner_type),
-                    (false, None) => format!("{}.fromJson(json)", response_class.type_str),
-                });
+                };
+                if response_class.is_status_code_union {
+                    // Multi-status union: thread the (optional) HTTP status
+                    // code through the handler via a `BeamStatusCodeRef`. When
+                    // the handler is status-code aware it fills the ref and we
+                    // decode the exact variant via `fromCode`; otherwise the
+                    // ref stays null and we fall back to the (discouraged)
+                    // `fromJson`.
+                    let t = &response_class.type_str;
+                    s.push_str(&format!(
+                        "final statusCodeRef = BeamStatusCodeRef();\n\t\treturn handleCached(method: BEAMRequestMethod.{method}, params: paramsJson, body: {body}, expectedResponseType: {expected}, statusCodeRef: statusCodeRef).then((json) {{\n\t\t\tfinal statusCode = statusCodeRef.statusCode;\n\t\t\treturn statusCode != null ? ({t}.fromCode(statusCode, json) ?? {t}.fromJson(json)) : {t}.fromJson(json);\n\t\t}});\n",
+                        method = method_str,
+                        body = body_emission,
+                        expected = expected_response_type,
+                        t = t,
+                    ));
+                } else {
+                    cpf!(s, "return handleCached(method: BEAMRequestMethod.{}, params: paramsJson, body: {}, expectedResponseType: {}).then((json) => {});", method_str, body_emission, expected_response_type, match (response_class.is_primitive, &response_class.list_inner_type) {
+                        (true, None) => "json".to_string(),
+                        (true, Some(_)) => format!("json"),
+                        (false, Some(inner_type)) => format!("(json as List).map((e) => {}.fromJson(e)).toList()", inner_type),
+                        (false, None) => format!("{}.fromJson(json)", response_class.type_str),
+                    });
+                }
                 s
             };
 

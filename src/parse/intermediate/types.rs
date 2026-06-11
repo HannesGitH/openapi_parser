@@ -209,7 +209,7 @@ pub enum Method {
     Options,
     Trace,
 }
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct AnnotatedObj<'a, T> {
     pub nullable: bool,
     pub optional: bool,
@@ -219,7 +219,7 @@ pub struct AnnotatedObj<'a, T> {
     pub value: T,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct AnnotatedReference<'a> {
     pub path: &'a str,
     pub optional: bool,
@@ -228,7 +228,7 @@ pub struct AnnotatedReference<'a> {
 }
 
 /// Intermediate Abstract Syntax Tree
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum IAST<'a> {
     Object(AnnotatedObj<'a, AlgType<'a>>),
     /// reference to an ast
@@ -238,7 +238,7 @@ pub enum IAST<'a> {
 }
 
 /// Algebraic Type
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum AlgType<'a> {
     Sum(Vec<SumVariant<'a>>),
     // basically the same as a sum type, but can only have references
@@ -249,7 +249,7 @@ pub enum AlgType<'a> {
 /// A single variant of a [`AlgType::Sum`] union: the variant `name`
 /// (either the referenced scheme name or the positional index) and the
 /// `typ` it resolves to.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct SumVariant<'a> {
     pub name: String,
     pub typ: IAST<'a>,
@@ -258,13 +258,13 @@ pub struct SumVariant<'a> {
 /// A single permitted value of a [`Primitive::Enum`]. `is_string` records
 /// whether the value was a JSON string (and so must be emitted quoted in
 /// the generated Dart) rather than a native value.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct EnumValue {
     pub value: String,
     pub is_string: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Primitive<'a> {
     String,
     Number,
@@ -278,7 +278,7 @@ pub enum Primitive<'a> {
     Binary,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Discrimination<'a> {
     pub key: &'a str,
     pub map: BTreeMap<&'a str, AnnotatedReference<'a>>,

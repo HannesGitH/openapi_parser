@@ -11,6 +11,39 @@ abstract interface class JsonRequestHandler {
   BEAMCacheHandler? cache;
 }
 
+/// A mutable out-parameter the request machinery passes down so a
+/// status-code-aware handler can report the HTTP status code of a response.
+///
+/// Generated multi-status endpoints (those returning a
+/// [BeamStatusCodeResponse]) create one of these per call; when the handler
+/// fills [statusCode] the response is decoded deterministically via
+/// `fromCode`, otherwise decoding falls back to the (discouraged) `fromJson`.
+class BeamStatusCodeRef {
+  int? statusCode;
+}
+
+/// Optional, additive capability a [JsonRequestHandler] MAY also implement to
+/// report the HTTP status code of a response.
+///
+/// This is fully backwards compatible: handlers that only implement
+/// [JsonRequestHandler] keep working unchanged, and multi-status endpoints
+/// simply fall back to `fromJson` for them. Handlers that implement this get
+/// deterministic, status-code-driven decoding via `fromCode`.
+abstract interface class BeamStatusCodeAwareHandler
+    implements JsonRequestHandler {
+  /// Like [JsonRequestHandler.handle], but also assigns the response's HTTP
+  /// status code to [statusCodeRef] before the returned future completes.
+  Future<dynamic> handleWithStatusCode({
+    required BEAMRequestMethod method,
+    required String path,
+    required BeamStatusCodeRef statusCodeRef,
+    Map<String, String> params = const {},
+    dynamic body,
+    BEAMExpectedResponseType expectedResponseType =
+        BEAMExpectedResponseType.json,
+  });
+}
+
 enum BEAMExpectedResponseType { json, binary }
 
 typedef BEAMRequestLeafDeps = JsonRequestHandler;
@@ -37,27 +70,40 @@ abstract class BEAMPath {
     dynamic body = const {},
     BEAMExpectedResponseType expectedResponseType =
         BEAMExpectedResponseType.json,
+    BeamStatusCodeRef? statusCodeRef,
   }) {
-    return handler
-        .handle(
-          method: method,
-          path: interpolatedPath,
-          params: params,
-          body: body,
-          expectedResponseType: expectedResponseType,
-        )
-        .then((response) {
-          handler.cache?.storeInCache(
-            response: response,
+    final h = handler;
+    // Use the status-code-aware path only when a ref was requested AND the
+    // handler supports it; otherwise fall back to the plain `handle`.
+    final Future<dynamic> upstream =
+        (statusCodeRef != null && h is BeamStatusCodeAwareHandler)
+        ? h.handleWithStatusCode(
             method: method,
-            interpolatedPath: interpolatedPath,
-            path: path,
+            path: interpolatedPath,
+            statusCodeRef: statusCodeRef,
+            params: params,
+            body: body,
+            expectedResponseType: expectedResponseType,
+          )
+        : h.handle(
+            method: method,
+            path: interpolatedPath,
             params: params,
             body: body,
             expectedResponseType: expectedResponseType,
           );
-          return response;
-        });
+    return upstream.then((response) {
+      handler.cache?.storeInCache(
+        response: response,
+        method: method,
+        interpolatedPath: interpolatedPath,
+        path: path,
+        params: params,
+        body: body,
+        expectedResponseType: expectedResponseType,
+      );
+      return response;
+    });
   }
 
   BEAMCachedResponse<dynamic> handleCached({
@@ -66,6 +112,7 @@ abstract class BEAMPath {
     dynamic body = const {},
     BEAMExpectedResponseType expectedResponseType =
         BEAMExpectedResponseType.json,
+    BeamStatusCodeRef? statusCodeRef,
   }) {
     return BEAMCachedResponse<dynamic>(
       upstreamFuture: handle(
@@ -73,6 +120,7 @@ abstract class BEAMPath {
         params: params,
         body: body,
         expectedResponseType: expectedResponseType,
+        statusCodeRef: statusCodeRef,
       ),
       cachedFuture: handler.cache?.fetchFromCache(
         method: method,

@@ -912,13 +912,16 @@ fn all_of_nullable_ref_generates_named_reference_property() {
     );
 }
 
-/// An endpoint with MORE THAN ONE response status code must expose a single,
-/// well-typed return value: a sealed union of every response, parsed as one
-/// response class. Previously the generator looped over the responses,
-/// generated a throwaway class per code, and returned `()` — so callers lost
-/// the response type entirely.
+/// An endpoint with MORE THAN ONE response status code must:
+///   * parse each status code into its OWN `*.resp.<code>.schema.dart` file,
+///     even when several codes reference the exact same schema (which used to
+///     collapse into one duplicated, colliding class), and
+///   * expose a single "super" sealed union over them that, in addition to
+///     the discouraged try-each `fromJson`, offers `fromCode(int statusCode,
+///     json)` switching over the codes.
 #[test]
-fn endpoint_multiple_responses_generate_single_union_response() {
+fn endpoint_multiple_responses_generate_status_keyed_union() {
+    // 200 -> User, while 400 and 404 BOTH point at the same Error schema.
     let spec = r##"{
         "openapi": "3.1.0",
         "info": { "title": "t", "version": "0" },
@@ -928,6 +931,11 @@ fn endpoint_multiple_responses_generate_single_union_response() {
                     "type": "object",
                     "properties": { "name": { "type": "string" } },
                     "required": ["name"]
+                },
+                "Error": {
+                    "type": "object",
+                    "properties": { "message": { "type": "string" } },
+                    "required": ["message"]
                 }
             }
         },
@@ -943,15 +951,19 @@ fn endpoint_multiple_responses_generate_single_union_response() {
                                 }
                             }
                         },
+                        "400": {
+                            "description": "",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/Error" }
+                                }
+                            }
+                        },
                         "404": {
                             "description": "",
                             "content": {
                                 "application/json": {
-                                    "schema": {
-                                        "type": "object",
-                                        "properties": { "message": { "type": "string" } },
-                                        "required": ["message"]
-                                    }
+                                    "schema": { "$ref": "#/components/schemas/Error" }
                                 }
                             }
                         }
@@ -969,24 +981,121 @@ fn endpoint_multiple_responses_generate_single_union_response() {
         "BEAMCachedResponse<()>",
         "multi-response endpoint must return a typed union, not ()",
     );
-    // It returns the single generated union response type, decoded via
-    // `.fromJson` on the combined `json` payload.
+
+    // The endpoint threads the optional status code through the handler and
+    // decodes via `fromCode`, falling back to `fromJson` when absent.
     assert_contains(
         route,
-        ".fromJson(json)",
-        "multi-response endpoint must decode the union via .fromJson",
+        "final statusCodeRef = BeamStatusCodeRef();",
+        "multi-response endpoint must create a status-code ref",
+    );
+    assert_contains(
+        route,
+        "statusCodeRef: statusCodeRef",
+        "multi-response endpoint must pass the ref into handleCached",
+    );
+    assert_contains(
+        route,
+        ".fromCode(statusCode, json)",
+        "multi-response endpoint must decode via fromCode when a status code is present",
+    );
+    assert_contains(
+        route,
+        "statusCode != null",
+        "multi-response endpoint must fall back to fromJson when no status code",
     );
 
-    // The union itself is generated as one sealed class file (not one file
-    // per status code).
-    let union = files
-        .iter()
-        .find(|(path, _)| path.ends_with("get.resp.schema.dart"))
-        .map(|(_, content)| content.as_str())
-        .expect("a single union response schema file must be generated");
+    // The optional handler machinery must exist in the generated runtime.
+    let endpoints = file(&files, "endpoints/endpoints.dart");
+    assert_contains(
+        endpoints,
+        "class BeamStatusCodeRef",
+        "BeamStatusCodeRef must be generated",
+    );
+    assert_contains(
+        endpoints,
+        "abstract interface class BeamStatusCodeAwareHandler",
+        "the optional BeamStatusCodeAwareHandler capability must be generated",
+    );
+
+    // Every status code gets its own per-code schema file.
+    for code in ["200", "400", "404"] {
+        let path = format!(
+            "endpoints/routes/_usersMethods/get.resp.{}.schema.dart",
+            code
+        );
+        assert!(
+            files.contains_key(&path),
+            "expected a per-code schema file {:?}, available:\n{}",
+            path,
+            {
+                let mut keys: Vec<&String> = files.keys().collect();
+                keys.sort();
+                keys.iter()
+                    .map(|s| format!("  {}", s))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+        );
+    }
+
+    // The super union file ties them together.
+    let union = file(
+        &files,
+        "endpoints/routes/_usersMethods/get.resp.schema.dart",
+    );
     assert_contains(
         union,
         "sealed class",
         "the unioned response must be a sealed class the caller can switch on",
+    );
+    // The union must implement BeamStatusCodeResponse so a handler can
+    // recognise it (`is BeamStatusCodeResponse`) and decode via fromCode.
+    assert_contains(
+        union,
+        "implements BeamStatusCodeResponse",
+        "the unioned response must implement BeamStatusCodeResponse",
+    );
+    // And that base type must actually exist in the generated runtime.
+    let serde = file(&files, "utils/serde.dart");
+    assert_contains(
+        serde,
+        "abstract interface class BeamStatusCodeResponse implements BEAMSerde",
+        "the BeamStatusCodeResponse base type must be generated in serde.dart",
+    );
+    // Status-code dispatch exists and has one arm per numeric code.
+    assert_contains(
+        union,
+        "fromCode(int statusCode",
+        "union must expose fromCode",
+    );
+    assert_contains(
+        union,
+        "return switch (statusCode)",
+        "fromCode uses a switch expression",
+    );
+    assert_contains(union, "200 =>", "fromCode must handle 200");
+    assert_contains(union, "400 =>", "fromCode must handle 400");
+    assert_contains(union, "404 =>", "fromCode must handle 404");
+    assert_contains(union, "_ => null,", "unknown codes return null");
+
+    // 400 and 404 share the Error schema but must NOT collide: each gets its
+    // own status-keyed wrapper subclass (the old bug emitted the same
+    // `...ErrorModel_` class multiple times).
+    assert_contains(
+        union,
+        "BEAM_usersMethods_getResponse_400Model_",
+        "400 must get its own status-keyed wrapper subclass",
+    );
+    assert_contains(
+        union,
+        "BEAM_usersMethods_getResponse_404Model_",
+        "404 must get its own status-keyed wrapper subclass",
+    );
+    // Both error arms still wrap the shared Error model as their value.
+    assert_contains(
+        union,
+        "BEAMErrorModel.fromJson(json)",
+        "error arms must decode the shared Error model",
     );
 }

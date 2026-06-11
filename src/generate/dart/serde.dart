@@ -13,6 +13,35 @@ extension BEAMSerdeExtension<T extends BEAMSerde> on T {
   }
 }
 
+/// Implemented by every generated response union that aggregates more than
+/// one HTTP status code.
+///
+/// On top of [BEAMSerde.toJson] and the (non-deterministic, discouraged)
+/// `fromJson`, each implementer exposes a static factory matching
+/// [BeamStatusCodeResponseParser]:
+///
+/// ```dart
+/// static T? fromCode(int statusCode, dynamic json)
+/// ```
+///
+/// which decodes the variant for a given HTTP status code (or returns null
+/// for an unknown one). A request handler that knows the response's status
+/// code can therefore decode the correct variant deterministically —
+/// `value is BeamStatusCodeResponse` flags the unions that support this —
+/// instead of falling back to the ambiguous `fromJson`.
+///
+/// Note: `fromCode` is necessarily `static` (the value is produced *by* it),
+/// so it cannot be a member of this interface; the generated unions wire
+/// their `fromCode` tear-off to the handler explicitly.
+abstract interface class BeamStatusCodeResponse implements BEAMSerde {}
+
+/// Signature of the static `fromCode` factory every
+/// [BeamStatusCodeResponse] provides: maps an HTTP `statusCode` and the
+/// decoded `json` body to the matching response variant, or null for an
+/// unknown status code.
+typedef BeamStatusCodeResponseParser<T extends BeamStatusCodeResponse> =
+    T? Function(int statusCode, dynamic json);
+
 class BEAMUnknownValueError extends Error {
   final String? message;
   BEAMUnknownValueError(this.message);
