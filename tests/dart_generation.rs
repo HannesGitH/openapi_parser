@@ -1098,4 +1098,87 @@ fn endpoint_multiple_responses_generate_status_keyed_union() {
         "BEAMErrorModel.fromJson(json)",
         "error arms must decode the shared Error model",
     );
+
+    // Every union exposes short-named redirecting constructors (`.codeXXX`
+    // for responses) and an exhaustive `match<T>` dispatcher.
+    assert_contains(
+        union,
+        ".code200(BEAMUserModel value) = BEAM_usersMethods_getResponse_200Model_;",
+        "union must expose a short-named redirecting constructor per code",
+    );
+    assert_contains(
+        union,
+        ".code404(BEAMErrorModel value) = BEAM_usersMethods_getResponse_404Model_;",
+        "shared-schema codes still get their own redirecting constructor",
+    );
+    assert_contains(
+        union,
+        "T match<T>({",
+        "union must expose a match<T> dispatcher",
+    );
+    assert_contains(
+        union,
+        "required T Function(BEAM_usersMethods_getResponse_200Model_ value) code200,",
+        "match must take one callback per arm, keyed by the short name",
+    );
+    assert_contains(
+        union,
+        "BEAM_usersMethods_getResponse_200Model_ t => code200(t),",
+        "match must dispatch each concrete arm to its callback",
+    );
+}
+
+/// A `oneOf` schema becomes a sum-type union whose arms are anonymous, so
+/// each gets a positional `variant{N}` short name on both the redirecting
+/// constructor and the `match<T>` dispatcher.
+#[test]
+fn sum_type_union_exposes_variant_constructors_and_match() {
+    let spec = r##"{
+        "openapi": "3.1.0",
+        "info": { "title": "t", "version": "0" },
+        "components": {
+            "schemas": {
+                "Cat": {
+                    "type": "object",
+                    "properties": { "meow": { "type": "string" } },
+                    "required": ["meow"]
+                },
+                "Dog": {
+                    "type": "object",
+                    "properties": { "bark": { "type": "string" } },
+                    "required": ["bark"]
+                },
+                "Pet": {
+                    "oneOf": [
+                        { "$ref": "#/components/schemas/Cat" },
+                        { "$ref": "#/components/schemas/Dog" }
+                    ]
+                }
+            }
+        },
+        "paths": {}
+    }"##;
+    let files = generate(spec);
+    let pet = file(&files, "schemes/Pet.dart");
+    assert_contains(
+        pet,
+        "sealed class BEAMPetModel",
+        "oneOf must be a sealed union",
+    );
+    assert_contains(
+        pet,
+        ".variant0(",
+        "anonymous sum arms get a positional variant0 redirecting constructor",
+    );
+    assert_contains(pet, ".variant1(", "second arm gets variant1");
+    assert_contains(
+        pet,
+        "T match<T>({",
+        "sum union must expose a match<T> dispatcher",
+    );
+    assert_contains(
+        pet,
+        "variant0,",
+        "match must expose a variant0 callback parameter",
+    );
 }

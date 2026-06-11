@@ -355,6 +355,40 @@ class BEAM{}Model implements BEAMSerde {{
         }
     }
 
+    /// Builds the shared members every generated union exposes inside its
+    /// sealed-class body:
+    ///
+    ///   * a short-named **redirecting factory constructor** per variant, so
+    ///     callers can build an arm without spelling out its long wrapper
+    ///     class name (`Union.code200(value)` / `Union.variant0(value)`), and
+    ///   * an exhaustive `T match<T>({...})` dispatcher over the arms.
+    ///
+    /// Each entry of `variants` is `(short_name, subclass, value_type)`, where
+    /// `subclass` is the concrete wrapper subtype identifier (including its
+    /// trailing `_`) and `value_type` is the type its `value` field holds.
+    fn union_members(class_name: &str, variants: &[(String, String, String)]) -> String {
+        let mut s = String::new();
+        for (short, subclass, value_type) in variants {
+            s.push_str(&format!(
+                "\n\tfactory {}.{}({} value) = {};",
+                class_name, short, value_type, subclass
+            ));
+        }
+        s.push_str("\n\n\tT match<T>({");
+        for (short, subclass, _value_type) in variants {
+            s.push_str(&format!(
+                "\n\t\trequired T Function({} value) {},",
+                subclass, short
+            ));
+        }
+        s.push_str("\n\t}) => switch (this) {");
+        for (short, subclass, _value_type) in variants {
+            s.push_str(&format!("\n\t\t{} t => {}(t),", subclass, short));
+        }
+        s.push_str("\n\t};");
+        s
+    }
+
     fn generate_sum_type(
         &self,
         name: &str,
@@ -435,6 +469,28 @@ class BEAM{}Model implements BEAMSerde {{
         content.push_str(&format!(
             "\n\t\tthrow BEAMUnionParseMultiError(errors);\n\t}}",
         ));
+
+        // Inline (anonymous / `$ref`) sum variants have no natural name, so
+        // each arm gets a positional `variant{N}` short name.
+        let member_variants: Vec<(String, String, String)> = variants
+            .iter()
+            .enumerate()
+            .map(|(i, variant)| {
+                let value_type_name = match &variant.special_case {
+                    Some(GenerationSpecialCase {
+                        reason: GenerationSpecialCaseType::Link(internal_type_name),
+                        ..
+                    }) => self.class_name(internal_type_name),
+                    _ => variant.class_name.clone(),
+                };
+                (
+                    format!("variant{}", i),
+                    format!("{}_", variant.class_name),
+                    value_type_name,
+                )
+            })
+            .collect();
+        content.push_str(&Self::union_members(&class_name, &member_variants));
 
         content.push_str("\n}\n\n");
 
@@ -621,6 +677,19 @@ class BEAM{}Model implements BEAMSerde {{
         }
         content.push_str(&format!("\n\t\t\t_ => {},\n\t\t}};\n\t}}", default_arm));
 
+        // Each arm is named by its status `code` (e.g. `code200`).
+        let member_variants: Vec<(String, String, String)> = variants
+            .iter()
+            .map(|v| {
+                (
+                    format!("code{}", sanitize(&v.code)),
+                    format!("{}_", variant_class(v)),
+                    v.value_type.clone(),
+                )
+            })
+            .collect();
+        content.push_str(&Self::union_members(&class_name, &member_variants));
+
         content.push_str("\n}\n\n");
 
         for v in variants {
@@ -743,7 +812,21 @@ class BEAM{}Model implements BEAMSerde {{
         content.push_str("\t\t};\n");
         content.push_str("\t}\n");
 
-        content.push_str("}\n\n");
+        // Each arm gets a positional `variant{N}` short name.
+        let member_variants: Vec<(String, String, String)> = variants
+            .iter()
+            .enumerate()
+            .map(|(i, variant)| {
+                (
+                    format!("variant{}", i),
+                    format!("{}_", variant.class_name),
+                    variant.referenced_type_name.clone(),
+                )
+            })
+            .collect();
+        content.push_str(&Self::union_members(&class_name, &member_variants));
+
+        content.push_str("\n}\n\n");
 
         // Generate variant classes
         for variant in variants.iter() {
