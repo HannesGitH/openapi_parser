@@ -86,7 +86,6 @@ abstract class BEAMPath {
   }
 }
 
-//TODO: this is the root BEAM
 class BEAM extends BEAMHasPath {
   final BEAMRequestLeafDeps deps;
   BEAM({required JsonRequestHandler handler}) : deps = handler;

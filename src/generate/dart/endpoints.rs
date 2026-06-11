@@ -135,7 +135,12 @@ impl<'a> EndpointAdder<'a> {
                 Some(request) => {
                     //do things
                     let request_name = format!("{}{}Request", name, method_str);
-                    let (content, sub_deps, special_case, nullable, optional, _is_binary) = self
+                    let schemes::ParsedIast {
+                        content,
+                        files: sub_deps,
+                        special_case,
+                        ..
+                    } = self
                         .scheme_adder
                         .parse_named_iast(&request_name, request, depth + 1);
                     deps.extend(sub_deps.into_iter().map(|f| File {
@@ -218,7 +223,13 @@ impl<'a> EndpointAdder<'a> {
                     let response_name = format!("{}_{}Response", name, method_str);
                     //TODO: add parser for multiple responses
                     let (response_code, response) = responses.first_key_value().unwrap();
-                    let (content, sub_deps, special_case, nullable, optional, ret_is_binary) = self
+                    let schemes::ParsedIast {
+                        content,
+                        files: sub_deps,
+                        special_case,
+                        is_binary: ret_is_binary,
+                        ..
+                    } = self
                         .scheme_adder
                         .parse_named_iast(&response_name, &response, depth + 1);
                     let dep_path_str =

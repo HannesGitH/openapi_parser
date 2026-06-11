@@ -57,21 +57,24 @@ impl<'a> SchemeAdder<'a> {
         let mut scheme_files = Vec::new();
         for scheme in self.complete_iast.unwrap().schemes.iter() {
             let sanitized_scheme_name = sanitize(scheme.name);
-            let (mut content, depends_on_files, _, _nullable, _optional, _is_binary) = self
-                .parse_named_iast(
-                    format!(
-                        "{}{}",
-                        sanitized_scheme_name,
-                        if scheme.is_inherently_nullable {
-                            "NonNull"
-                        } else {
-                            ""
-                        }
-                    )
-                    .as_str(),
-                    &scheme.obj,
-                    0,
-                );
+            let ParsedIast {
+                mut content,
+                files: depends_on_files,
+                ..
+            } = self.parse_named_iast(
+                format!(
+                    "{}{}",
+                    sanitized_scheme_name,
+                    if scheme.is_inherently_nullable {
+                        "NonNull"
+                    } else {
+                        ""
+                    }
+                )
+                .as_str(),
+                &scheme.obj,
+                0,
+            );
 
             if scheme.is_inherently_nullable {
                 // lol irgendwann sollte man mal auf ne templating engine umsteigen
@@ -135,20 +138,12 @@ class BEAM{}Model implements BEAMSerde {{
         )
     }
 
-    // return (content, files, not_built, nullable, optional)
     pub(super) fn parse_named_iast(
         &self,
         name: &str,
         iast: &intermediate::IAST,
         depth: usize,
-    ) -> (
-        String,
-        Vec<File>,
-        Option<GenerationSpecialCase>,
-        bool,
-        bool,
-        bool,
-    ) {
+    ) -> ParsedIast {
         match iast {
             intermediate::IAST::Object(annotated_obj) => {
                 let doc_str = mk_doc_str(name, annotated_obj, 0);
@@ -157,9 +152,14 @@ class BEAM{}Model implements BEAMSerde {{
                 match alg_type {
                     AlgType::Sum(sum) => {
                         let (content, files) = self.generate_sum_type(name, &doc_str, sum, depth);
-                        let nullable = annotated_obj.nullable;
-                        let optional = annotated_obj.optional;
-                        (content, files, None, nullable, optional, false)
+                        ParsedIast {
+                            content,
+                            files,
+                            special_case: None,
+                            nullable: annotated_obj.nullable,
+                            optional: annotated_obj.optional,
+                            is_binary: false,
+                        }
                     }
                     AlgType::DiscriminatedSum(discrimination) => {
                         let (content, files) = self.generate_discriminated_sum_type(
@@ -168,25 +168,35 @@ class BEAM{}Model implements BEAMSerde {{
                             discrimination,
                             depth,
                         );
-                        let nullable = annotated_obj.nullable;
-                        let optional = annotated_obj.optional;
-                        (content, files, None, nullable, optional, false)
+                        ParsedIast {
+                            content,
+                            files,
+                            special_case: None,
+                            nullable: annotated_obj.nullable,
+                            optional: annotated_obj.optional,
+                            is_binary: false,
+                        }
                     }
                     AlgType::Product(product) => {
                         let (content, files) =
                             self.generate_product_type(name, &doc_str, product, depth);
-                        let nullable = annotated_obj.nullable;
-                        let optional = annotated_obj.optional;
-                        (content, files, None, nullable, optional, false)
+                        ParsedIast {
+                            content,
+                            files,
+                            special_case: None,
+                            nullable: annotated_obj.nullable,
+                            optional: annotated_obj.optional,
+                            is_binary: false,
+                        }
                     }
                 }
             }
             intermediate::IAST::Reference(annotated_ref) => {
                 let link = annotated_ref.path;
                 let trimmed_link = sanitize(strip_ref_prefix(link));
-                (
+                ParsedIast {
                     // some references are nullable also (this should not be, but leons vibes introduce them nontheless), so we need to add the serde import anyway
-                    format!(
+                    content: format!(
                         "// ignore_for_file: unused_import\nimport '{}utils/serde.dart';\nexport '{}schemes/{}.dart';\nimport '{}schemes/{}.dart';\n",
                         "../".repeat(depth + 1),
                         "../".repeat(depth + 1),
@@ -194,16 +204,16 @@ class BEAM{}Model implements BEAMSerde {{
                         "../".repeat(depth + 1),
                         trimmed_link,
                     ),
-                    vec![],
-                    Some(GenerationSpecialCase {
+                    files: vec![],
+                    special_case: Some(GenerationSpecialCase {
                         type_name: self.class_name(&trimmed_link),
                         reason: GenerationSpecialCaseType::Link(trimmed_link),
                     }),
-                    annotated_ref.nullable,
-                    annotated_ref.optional,
+                    nullable: annotated_ref.nullable,
+                    optional: annotated_ref.optional,
                     // is binary: NO
-                    false,
-                )
+                    is_binary: false,
+                }
             }
             intermediate::IAST::Primitive(annotated_obj) => {
                 let doc_str = mk_doc_str(name, annotated_obj, 0);
@@ -234,26 +244,24 @@ class BEAM{}Model implements BEAMSerde {{
                         ret.push_str(&mk_type_def(name, &class_name, false));
 
                         ret.push_str(&content);
-                        (
-                            ret,
-                            vec![],
+                        ParsedIast {
+                            content: ret,
+                            files: vec![],
                             // enums are not considered primitive because e.g. they need to be parsed with .fromJson
-                            None,
-                            annotated_obj.nullable,
-                            annotated_obj.optional,
-                            false,
-                        )
+                            special_case: None,
+                            nullable: annotated_obj.nullable,
+                            optional: annotated_obj.optional,
+                            is_binary: false,
+                        }
                     }
                     intermediate::types::Primitive::List(inner_iast) => {
                         let mut inner_name = &format!("{}_", name);
-                        let (
+                        let ParsedIast {
                             mut content,
-                            depends_on_files,
-                            inner_special_case,
-                            _nullable,
-                            _optional,
-                            _is_binary,
-                        ) = self.parse_named_iast(&inner_name, inner_iast, depth);
+                            files: depends_on_files,
+                            special_case: inner_special_case,
+                            ..
+                        } = self.parse_named_iast(&inner_name, inner_iast, depth);
                         let mut file_dependencies = Vec::new();
 
                         for f in depends_on_files.into_iter() {
@@ -273,10 +281,10 @@ class BEAM{}Model implements BEAMSerde {{
 
                         content.push_str(&mk_type_def(name, &outer_name, true));
 
-                        (
+                        ParsedIast {
                             content,
-                            file_dependencies,
-                            Some(GenerationSpecialCase {
+                            files: file_dependencies,
+                            special_case: Some(GenerationSpecialCase {
                                 reason: GenerationSpecialCaseType::List(
                                     // the type of elements in the list
                                     self.class_name(&inner_name),
@@ -302,50 +310,50 @@ class BEAM{}Model implements BEAMSerde {{
                                 // e.g. List<BEAMSubscriptionModel>
                                 type_name: outer_name,
                             }),
-                            annotated_obj.nullable,
-                            annotated_obj.optional,
-                            false,
-                        )
+                            nullable: annotated_obj.nullable,
+                            optional: annotated_obj.optional,
+                            is_binary: false,
+                        }
                     }
                     intermediate::types::Primitive::Binary => {
                         let typ = to_dart_prim(&annotated_obj.value);
-                        (
-                            mk_type_def(name, &typ, false),
-                            vec![],
-                            Some(GenerationSpecialCase {
+                        ParsedIast {
+                            content: mk_type_def(name, &typ, false),
+                            files: vec![],
+                            special_case: Some(GenerationSpecialCase {
                                 reason: GenerationSpecialCaseType::Primitive,
                                 type_name: typ,
                             }),
-                            annotated_obj.nullable,
-                            annotated_obj.optional,
-                            true,
-                        )
+                            nullable: annotated_obj.nullable,
+                            optional: annotated_obj.optional,
+                            is_binary: true,
+                        }
                     }
                     intermediate::types::Primitive::Never => {
                         let typ = to_dart_prim(&annotated_obj.value);
-                        (
-                            mk_type_def(name, &typ, false),
-                            vec![],
-                            None,
+                        ParsedIast {
+                            content: mk_type_def(name, &typ, false),
+                            files: vec![],
+                            special_case: None,
                             // this is never nullable, as its never (simplifies usage a bit, by not having to set an explicit value)
-                            false,
-                            annotated_obj.optional,
-                            false,
-                        )
+                            nullable: false,
+                            optional: annotated_obj.optional,
+                            is_binary: false,
+                        }
                     }
                     _ => {
                         let typ = to_dart_prim(&annotated_obj.value);
-                        (
-                            mk_type_def(name, &typ, false),
-                            vec![],
-                            Some(GenerationSpecialCase {
+                        ParsedIast {
+                            content: mk_type_def(name, &typ, false),
+                            files: vec![],
+                            special_case: Some(GenerationSpecialCase {
                                 reason: GenerationSpecialCaseType::Primitive,
                                 type_name: typ,
                             }),
-                            annotated_obj.nullable,
-                            annotated_obj.optional,
-                            false,
-                        )
+                            nullable: annotated_obj.nullable,
+                            optional: annotated_obj.optional,
+                            is_binary: false,
+                        }
                     }
                 }
             }
@@ -372,8 +380,13 @@ class BEAM{}Model implements BEAMSerde {{
         for (union_inner_name, iast) in sum.iter() {
             let sanitized_inner_name = sanitize(union_inner_name);
             let mut variant_name = index_to_name(&sanitized_inner_name);
-            let (content, depends_on_files, not_built, nullable, optional, is_binary) =
-                self.parse_named_iast(&variant_name, iast, depth + 1);
+            let ParsedIast {
+                content,
+                files: depends_on_files,
+                special_case: not_built,
+                nullable,
+                ..
+            } = self.parse_named_iast(&variant_name, iast, depth + 1);
             if let Some(GenerationSpecialCase {
                 type_name: _,
                 reason: GenerationSpecialCaseType::Link(internal_type_name),
@@ -742,14 +755,12 @@ class BEAM{}Model implements BEAMSerde {{
                     }
                     intermediate::types::Primitive::List(inner_iast) => {
                         let mut full_name = &format!("{}_{}", name, sanitized_p_name);
-                        let (
+                        let ParsedIast {
                             content,
-                            depends_on_files,
-                            inner_special_case,
-                            _nullable,
-                            _optional,
-                            _is_binary,
-                        ) = self.parse_named_iast(&full_name, inner_iast, depth + 1);
+                            files: depends_on_files,
+                            special_case: inner_special_case,
+                            ..
+                        } = self.parse_named_iast(&full_name, inner_iast, depth + 1);
 
                         if let Some(GenerationSpecialCase {
                             type_name: _,
@@ -798,8 +809,11 @@ class BEAM{}Model implements BEAMSerde {{
                     }
                     intermediate::types::Primitive::Map(inner_iast) => {
                         let full_name = format!("{}_{}", name, sanitized_p_name);
-                        let (content, depends_on_files, _, _nullable, _optional, _is_binary) =
-                            self.parse_named_iast(&full_name, inner_iast, depth + 1);
+                        let ParsedIast {
+                            content,
+                            files: depends_on_files,
+                            ..
+                        } = self.parse_named_iast(&full_name, inner_iast, depth + 1);
                         file_dependencies.push(File {
                             path: std::path::PathBuf::from(format!(
                                 "{}/{}.dart",
@@ -836,8 +850,14 @@ class BEAM{}Model implements BEAMSerde {{
             }
             let full_name = format!("{}_{}", name, sanitized_p_name);
             let mut type_name = self.class_name(&full_name);
-            let (content, depends_on_files, special_case, nullable, optional, _is_binary) =
-                self.parse_named_iast(&full_name, iast, depth + 1);
+            let ParsedIast {
+                content,
+                files: depends_on_files,
+                special_case,
+                nullable,
+                optional,
+                ..
+            } = self.parse_named_iast(&full_name, iast, depth + 1);
             if let Some(GenerationSpecialCase {
                 reason: GenerationSpecialCaseType::Link(internal_type_name),
                 type_name: _,
@@ -1130,6 +1150,22 @@ enum PrimitivePropertyType {
         inner_is_primitive: bool,
     },
     Default,
+}
+
+/// Result of [`SchemeAdder::parse_named_iast`].
+///
+/// `content` is the generated Dart source for this node, `files` are the
+/// dependent files produced while recursing, `special_case` carries the
+/// classification (link / list / primitive) used by callers to decide how
+/// to reference this type, and `nullable` / `optional` / `is_binary`
+/// propagate the corresponding annotations.
+pub(super) struct ParsedIast {
+    pub content: String,
+    pub files: Vec<File>,
+    pub special_case: Option<GenerationSpecialCase>,
+    pub nullable: bool,
+    pub optional: bool,
+    pub is_binary: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
