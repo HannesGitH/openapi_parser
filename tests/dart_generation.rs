@@ -1128,9 +1128,10 @@ fn endpoint_multiple_responses_generate_status_keyed_union() {
     );
 }
 
-/// A `oneOf` schema becomes a sum-type union whose arms are anonymous, so
-/// each gets a positional `variant{N}` short name on both the redirecting
-/// constructor and the `match<T>` dispatcher.
+/// A `oneOf` schema becomes a sum-type union. `$ref` arms are named by their
+/// referenced schema (lowerCamelCased, e.g. `cat`/`dog`) on both the
+/// redirecting constructor and the `match<T>` dispatcher; only anonymous
+/// inline arms fall back to a positional `variant{N}`.
 #[test]
 fn sum_type_union_exposes_variant_constructors_and_match() {
     let spec = r##"{
@@ -1165,12 +1166,23 @@ fn sum_type_union_exposes_variant_constructors_and_match() {
         "sealed class BEAMPetModel",
         "oneOf must be a sealed union",
     );
+    // `$ref` arms are named after their schema, lowerCamelCased — NOT the
+    // positional `variant{N}` fallback.
     assert_contains(
         pet,
-        ".variant0(",
-        "anonymous sum arms get a positional variant0 redirecting constructor",
+        ".cat(BEAMCatModel value) =",
+        "a $ref arm uses the referenced schema name (cat) for its constructor",
     );
-    assert_contains(pet, ".variant1(", "second arm gets variant1");
+    assert_contains(
+        pet,
+        ".dog(BEAMDogModel value) =",
+        "the second $ref arm uses its schema name (dog)",
+    );
+    assert_not_contains(
+        pet,
+        ".variant0(",
+        "named $ref arms must NOT fall back to variant0",
+    );
     assert_contains(
         pet,
         "T match<T>({",
@@ -1178,7 +1190,8 @@ fn sum_type_union_exposes_variant_constructors_and_match() {
     );
     assert_contains(
         pet,
-        "variant0,",
-        "match must expose a variant0 callback parameter",
+        "cat,",
+        "match must expose a `cat` callback parameter for the Cat arm",
     );
+    assert_contains(pet, "dog,", "match must expose a `dog` callback parameter");
 }

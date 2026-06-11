@@ -404,10 +404,13 @@ class BEAM{}Model implements BEAMSerde {{
 
         let mut variants = Vec::new();
 
-        for intermediate::types::SumVariant {
-            name: union_inner_name,
-            typ: iast,
-        } in sum.iter()
+        for (
+            index,
+            intermediate::types::SumVariant {
+                name: union_inner_name,
+                typ: iast,
+            },
+        ) in sum.iter().enumerate()
         {
             let sanitized_inner_name = sanitize(union_inner_name);
             let mut variant_name = index_to_name(&sanitized_inner_name);
@@ -426,6 +429,9 @@ class BEAM{}Model implements BEAMSerde {{
             variants.push(SumVariantClass {
                 class_name: self.class_name(&variant_name),
                 special_case: parsed.special_case,
+                // Prefer the `$ref` schema name; inline arms fall back to
+                // `variant{N}`.
+                short_name: short_variant_name(union_inner_name, index),
             });
             for f in parsed.files.into_iter() {
                 sub_file_dependencies.push(f);
@@ -470,12 +476,11 @@ class BEAM{}Model implements BEAMSerde {{
             "\n\t\tthrow BEAMUnionParseMultiError(errors);\n\t}}",
         ));
 
-        // Inline (anonymous / `$ref`) sum variants have no natural name, so
-        // each arm gets a positional `variant{N}` short name.
+        // Arms are named by their `$ref` schema name where available, falling
+        // back to a positional `variant{N}` for inline arms.
         let member_variants: Vec<(String, String, String)> = variants
             .iter()
-            .enumerate()
-            .map(|(i, variant)| {
+            .map(|variant| {
                 let value_type_name = match &variant.special_case {
                     Some(GenerationSpecialCase {
                         reason: GenerationSpecialCaseType::Link(internal_type_name),
@@ -484,7 +489,7 @@ class BEAM{}Model implements BEAMSerde {{
                     _ => variant.class_name.clone(),
                 };
                 (
-                    format!("variant{}", i),
+                    variant.short_name.clone(),
                     format!("{}_", variant.class_name),
                     value_type_name,
                 )
@@ -743,12 +748,15 @@ class BEAM{}Model implements BEAMSerde {{
         // Build variants from discrimination map
         let mut variants: Vec<DiscriminatedVariant> = Vec::new();
 
-        for (discriminator_value, annotated_ref) in discrimination.map.iter() {
+        for (index, (discriminator_value, annotated_ref)) in discrimination.map.iter().enumerate() {
             let trimmed_link = sanitize(strip_ref_prefix(annotated_ref.path));
             variants.push(DiscriminatedVariant {
                 class_name: self.class_name(&format!("{}{}", name, trimmed_link)),
                 discriminator_value,
                 referenced_type_name: self.class_name(&trimmed_link),
+                // Discriminated arms are always `$ref`s, so use the referenced
+                // schema name.
+                short_name: short_variant_name(&trimmed_link, index),
             });
         }
 
@@ -812,13 +820,12 @@ class BEAM{}Model implements BEAMSerde {{
         content.push_str("\t\t};\n");
         content.push_str("\t}\n");
 
-        // Each arm gets a positional `variant{N}` short name.
+        // Each arm is named by its referenced schema.
         let member_variants: Vec<(String, String, String)> = variants
             .iter()
-            .enumerate()
-            .map(|(i, variant)| {
+            .map(|variant| {
                 (
-                    format!("variant{}", i),
+                    variant.short_name.clone(),
                     format!("{}_", variant.class_name),
                     variant.referenced_type_name.clone(),
                 )
@@ -1279,6 +1286,29 @@ pub fn sanitize(name: &str) -> String {
         .collect()
 }
 
+/// Derives a short, lowerCamelCase name for a union arm's redirecting
+/// constructor / `match` callback.
+///
+/// `$ref` sum-variants carry the referenced schema name in `raw_name` (the
+/// preferred, meaningful name, e.g. `Cat` -> `cat`). Inline variants are
+/// named by their positional index in the parser; for those (or any name that
+/// doesn't start with an ASCII letter and so can't be cleanly camelCased) we
+/// fall back to `variant{index}`.
+fn short_variant_name(raw_name: &str, index: usize) -> String {
+    // Inline (anonymous) variants are named by their positional index.
+    if raw_name.parse::<usize>().is_ok() {
+        return format!("variant{}", index);
+    }
+    let sanitized = sanitize(raw_name);
+    let mut chars = sanitized.chars();
+    match chars.next() {
+        Some(first) if first.is_ascii_alphabetic() => {
+            format!("{}{}", first.to_ascii_lowercase(), chars.as_str())
+        }
+        _ => format!("variant{}", index),
+    }
+}
+
 /// Returns the English word for `c` if it is an ASCII digit.
 fn digit_to_word(c: char) -> Option<&'static str> {
     match c {
@@ -1403,6 +1433,9 @@ struct DiscriminatedVariant<'a> {
     class_name: String,
     discriminator_value: &'a str,
     referenced_type_name: String,
+    /// Short, lowerCamelCase arm name derived from the referenced schema,
+    /// used for the redirecting constructor and `match` callback.
+    short_name: String,
 }
 
 /// One arm of a (non-discriminated) union built by
@@ -1412,6 +1445,10 @@ struct DiscriminatedVariant<'a> {
 struct SumVariantClass {
     class_name: String,
     special_case: Option<GenerationSpecialCase>,
+    /// Short, lowerCamelCase arm name (the `$ref` schema name when available,
+    /// else a positional `variant{N}`) used for the redirecting constructor
+    /// and `match` callback.
+    short_name: String,
 }
 
 /// One arm of a response union built by
