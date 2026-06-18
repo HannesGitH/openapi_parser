@@ -42,9 +42,12 @@ impl<'a> SchemeAdder<'a> {
     /// following `Reference`s) to a raw Dart primitive without
     /// `.toJson()` / `.fromJson()`.
     ///
-    /// `Enum` primitives are intentionally NOT counted as primitive
-    /// because the generator emits a real Dart enum class with
-    /// `.fromJson` for them.
+    /// `Enum` and `Never` are intentionally NOT counted as primitive: the
+    /// generator emits a real Dart enum class for the former and
+    /// `UnknownBEAMObject` (which implements `BEAMSerde`) for the latter,
+    /// both of which are (de)serialized via `.fromJson` / `.toJson()`. The
+    /// shared resolver already classifies them as their own
+    /// [`ResolvedRef`](crate::parse::intermediate::ResolvedRef) variants.
     fn iast_resolves_to_primitive(&self, iast: &intermediate::IAST<'a>) -> bool {
         match self.complete_iast {
             Some(iformat) => iformat.resolve_iast(iast).is_primitive(),
@@ -1017,6 +1020,15 @@ class BEAM{}Model implements BEAMSerde {{
                                         value: Primitive::Enum(_),
                                         ..
                                     }) => false,
+                                    // `Never` -> `UnknownBEAMObject`, which
+                                    // implements `BEAMSerde`, so its list
+                                    // elements are (de)serialized via
+                                    // `.fromJson` / `.toJson()` like a class
+                                    // rather than cast as raw primitives.
+                                    intermediate::IAST::Primitive(AnnotatedObj {
+                                        value: Primitive::Never,
+                                        ..
+                                    }) => false,
                                     intermediate::IAST::Primitive(_) => true,
                                     // A reference may point at a scheme that is
                                     // itself just a primitive typedef (e.g.
@@ -1053,6 +1065,13 @@ class BEAM{}Model implements BEAMSerde {{
                             ),
                             PropertyType::Primitive(PrimitivePropertyType::Default),
                         )
+                    }
+                    // `Never` -> `UnknownBEAMObject`, which implements
+                    // `BEAMSerde` (`.fromJson` / `.toJson`). Treat it like a
+                    // class property so it is (de)serialized rather than
+                    // cast as a raw primitive.
+                    intermediate::types::Primitive::Never => {
+                        (to_dart_prim(&prim.value), PropertyType::Normal)
                     }
                     _ => (
                         to_dart_prim(&prim.value),

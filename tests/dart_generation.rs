@@ -672,9 +672,10 @@ fn resolve_ref_accepts_both_bare_and_full_paths() {
         "info": { "title": "t", "version": "0" },
         "components": {
             "schemas": {
-                "Id":   { "type": "string" },
-                "Tag":  { "type": "string", "enum": ["a"] },
-                "User": { "type": "object", "properties": { "n": { "type": "string" } } }
+                "Id":      { "type": "string" },
+                "Tag":     { "type": "string", "enum": ["a"] },
+                "Nothing": { "type": "null" },
+                "User":    { "type": "object", "properties": { "n": { "type": "string" } } }
             }
         },
         "paths": {}
@@ -698,6 +699,11 @@ fn resolve_ref_accepts_both_bare_and_full_paths() {
     // enum is its own variant, NOT Primitive
     assert_eq!(intermediate.resolve_ref("Tag"), ResolvedRef::Enum);
     assert!(!intermediate.resolve_ref("Tag").is_primitive());
+    // `null` (Never) is its own variant: neither Primitive nor Class,
+    // because its Dart form `UnknownBEAMObject` has `.fromJson` / `.toJson`.
+    assert_eq!(intermediate.resolve_ref("Nothing"), ResolvedRef::Never);
+    assert!(intermediate.resolve_ref("Nothing").is_never());
+    assert!(!intermediate.resolve_ref("Nothing").is_primitive());
     // objects are Class
     assert_eq!(intermediate.resolve_ref("User"), ResolvedRef::Class);
     // missing names report Unknown, not panic
@@ -1196,4 +1202,181 @@ fn sum_type_union_exposes_variant_constructors_and_match() {
         "match must expose a `cat` callback parameter for the Cat arm",
     );
     assert_contains(pet, "dog,", "match must expose a `dog` callback parameter");
+}
+
+// ---------------------------------------------------------------------------
+// `Never` / `UnknownBEAMObject`
+//
+// `type: "null"` parses to `Primitive::Never`, classified by the resolver
+// as its own `ResolvedRef::Never` variant (neither `Primitive` nor `Class`).
+// It renders in Dart as `UnknownBEAMObject`, which — unlike the raw
+// primitive Dart types (`String`, `int`, ...) — implements `BEAMSerde` and
+// therefore DOES have `.fromJson` / `.toJson`. So the Dart generator must
+// (de)serialize it like a class.
+// ---------------------------------------------------------------------------
+
+/// A scalar object property of type `null` (-> `UnknownBEAMObject`) must be
+/// (de)serialized via `.fromJson` / `.toJson()`, NOT cast as a raw
+/// primitive — `UnknownBEAMObject` has those methods.
+#[test]
+fn never_property_uses_fromjson_and_tojson() {
+    let spec = r##"{
+        "openapi": "3.1.0",
+        "info": { "title": "t", "version": "0" },
+        "components": {
+            "schemas": {
+                "Req": {
+                    "type": "object",
+                    "properties": {
+                        "extra": { "type": "null" }
+                    },
+                    "required": ["extra"]
+                }
+            }
+        },
+        "paths": {}
+    }"##;
+    let files = generate(spec);
+    let req = file(&files, "schemes/Req.dart");
+
+    assert_contains(
+        req,
+        "UnknownBEAMObject.fromJson(json['extra'])",
+        "never scalar property parses via .fromJson",
+    );
+    assert_contains(
+        req,
+        "extra?.toJson()",
+        "never scalar property serializes via .toJson",
+    );
+    // Must NOT be treated as a raw primitive (type-checked cast).
+    assert_not_contains(
+        req,
+        "val is UnknownBEAMObject",
+        "never property must not be cast as a raw primitive",
+    );
+}
+
+/// A `List` of `null` elements (-> `List<UnknownBEAMObject>`) must parse /
+/// serialize each element via `.fromJson` / `.toJson()`, not cast them raw.
+#[test]
+fn never_list_elements_use_fromjson_and_tojson() {
+    let spec = r##"{
+        "openapi": "3.1.0",
+        "info": { "title": "t", "version": "0" },
+        "components": {
+            "schemas": {
+                "Req": {
+                    "type": "object",
+                    "properties": {
+                        "vals": { "type": "array", "items": { "type": "null" } }
+                    },
+                    "required": ["vals"]
+                }
+            }
+        },
+        "paths": {}
+    }"##;
+    let files = generate(spec);
+    let req = file(&files, "schemes/Req.dart");
+
+    assert_contains(
+        req,
+        "BEAMReq_valsModel.fromJson(e)",
+        "never list elements parse via per-element .fromJson",
+    );
+    assert_contains(
+        req,
+        "(e) => e.toJson()",
+        "never list elements serialize via per-element .toJson",
+    );
+    assert_not_contains(
+        req,
+        "(e) => e as BEAMReq_valsModel",
+        "never list elements must not be cast as raw primitives",
+    );
+}
+
+/// An endpoint response that is a direct `$ref` to a `null` (`Never`)
+/// typedef must decode via `.fromJson` — the typedef expands to
+/// `UnknownBEAMObject`, which has a `.fromJson` factory.
+#[test]
+fn endpoint_response_ref_to_never_calls_fromjson() {
+    let spec = r##"{
+        "openapi": "3.1.0",
+        "info": { "title": "t", "version": "0" },
+        "components": {
+            "schemas": {
+                "Nothing": { "type": "null" }
+            }
+        },
+        "paths": {
+            "/nothing": {
+                "get": {
+                    "responses": {
+                        "200": {
+                            "description": "",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/Nothing" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }"##;
+    let files = generate(spec);
+    let route = file(&files, "endpoints/routes/_nothing.dart");
+
+    assert_contains(
+        route,
+        "BEAMNothingModel.fromJson(json)",
+        "$ref-to-never response must decode via .fromJson",
+    );
+    // The raw-primitive form would be `.then((json) => json)`.
+    assert_not_contains(
+        route,
+        "(json) => json)",
+        "$ref-to-never response must not be returned as raw JSON",
+    );
+}
+
+/// An endpoint request body that is a direct `$ref` to a `null` (`Never`)
+/// typedef must serialize via `.toJson()` (it expands to
+/// `UnknownBEAMObject`, which has `.toJson`).
+#[test]
+fn endpoint_request_body_ref_to_never_calls_tojson() {
+    let spec = r##"{
+        "openapi": "3.1.0",
+        "info": { "title": "t", "version": "0" },
+        "components": {
+            "schemas": {
+                "Nothing": { "type": "null" }
+            }
+        },
+        "paths": {
+            "/nothing": {
+                "post": {
+                    "requestBody": {
+                        "content": {
+                            "application/json": {
+                                "schema": { "$ref": "#/components/schemas/Nothing" }
+                            }
+                        }
+                    },
+                    "responses": { "204": { "description": "" } }
+                }
+            }
+        }
+    }"##;
+    let files = generate(spec);
+    let route = file(&files, "endpoints/routes/_nothing.dart");
+
+    assert_contains(
+        route,
+        "body: body?.toJson()",
+        "$ref-to-never request body must serialize via .toJson",
+    );
 }

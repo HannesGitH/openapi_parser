@@ -30,8 +30,15 @@ pub enum ResolvedRef {
     /// codegen perspective it behaves like [`Class`](Self::Class) (callers
     /// that only care about "do I call .fromJson?" should treat it the same).
     Enum,
+    /// The [`Primitive::Never`] leaf, rendered in Dart as
+    /// `UnknownBEAMObject`. It is its own classification — neither a raw
+    /// primitive nor a generated class — because `UnknownBEAMObject`
+    /// *does* implement `BEAMSerde` (it has `.fromJson()` / `.toJson()`)
+    /// and so, for codegen purposes, must be (de)serialized like a
+    /// [`Class`](Self::Class) rather than cast like a [`Primitive`](Self::Primitive).
+    Never,
     /// A raw Dart primitive value (`String`, `int`, `num`, `bool`,
-    /// `dynamic`, `Uint8List`, `Never`) or a typedef expanding to a
+    /// `dynamic`, `Uint8List`) or a typedef expanding to a
     /// `List<_>` / `Map<String,_>`. These types do *not* have
     /// `.toJson()` / `.fromJson()` methods and must be treated as raw
     /// JSON-compatible values (cast, don't parse).
@@ -50,9 +57,18 @@ impl ResolvedRef {
     /// from raw JSON rather than calling a generated constructor.
     ///
     /// `Enum` is intentionally NOT primitive: the generator emits a real
-    /// Dart enum class with `.fromJson`.
+    /// Dart enum class with `.fromJson`. `Never` is likewise NOT
+    /// primitive: its Dart representation (`UnknownBEAMObject`) has
+    /// `.fromJson` / `.toJson` — see [`Self::is_never`].
     pub fn is_primitive(&self) -> bool {
         matches!(self, ResolvedRef::Primitive)
+    }
+
+    /// True iff this resolves to the [`Primitive::Never`] leaf
+    /// (Dart `UnknownBEAMObject`). Unlike a raw primitive, it must be
+    /// (de)serialized via `.fromJson` / `.toJson()` like a class.
+    pub fn is_never(&self) -> bool {
+        matches!(self, ResolvedRef::Never)
     }
 }
 
@@ -109,6 +125,7 @@ impl<'a> IntermediateFormat<'a> {
                 IAST::Primitive(p) => {
                     return match &p.value {
                         Primitive::Enum(_) => ResolvedRef::Enum,
+                        Primitive::Never => ResolvedRef::Never,
                         _ => ResolvedRef::Primitive,
                     };
                 }
@@ -135,6 +152,7 @@ impl<'a> IntermediateFormat<'a> {
             IAST::Object(_) => ResolvedRef::Class,
             IAST::Primitive(p) => match &p.value {
                 Primitive::Enum(_) => ResolvedRef::Enum,
+                Primitive::Never => ResolvedRef::Never,
                 _ => ResolvedRef::Primitive,
             },
             IAST::Reference(r) => self.resolve_ref(r.path),
