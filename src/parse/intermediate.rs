@@ -53,10 +53,12 @@ pub fn parse(spec: &oas3::Spec, args: IntermediateArgs) -> Result<IntermediateFo
         None => return Err(Error::NoComponents),
     };
 
-    // Precompute which top-level schemes are deprecated. We KEEP deprecated
-    // schemes in the output (option A) so that sum-type variants and ref
-    // passthroughs still resolve; the set is only used to decide whether a
-    // property/parameter referencing such a scheme should be dropped.
+    // Precompute which top-level schemes are deprecated. The scheme definition
+    // itself is still emitted so that non-deprecated refs to it keep resolving,
+    // but this set drives dropping any *reference* to a deprecated scheme:
+    // properties, parameters, and sum-type (oneOf/anyOf) variants are all
+    // removed entirely when `ignore_deprecated_fields` is on -- a deprecated
+    // arm must not exist client-side at all (no decode, no construct).
     let deprecated_schemes: HashSet<&str> = components
         .schemas
         .iter()
@@ -424,18 +426,22 @@ fn parse_object<'a>(
                 // theoretisch können die auch mal kein mapping haben, dann muss die value hinter dem key in dem object den Namen des objects haben
                 map: mapping
                     .into_iter()
-                    .map(|(k, v)| {
-                        (
+                    .filter_map(|(k, v)| {
+                        let is_deprecated = ctx.ref_targets_deprecated(v.as_str());
+                        // Fully drop deprecated variants: a deprecated arm must not
+                        // exist client-side at all (no decode, no construct).
+                        if ctx.args.ignore_deprecated_fields && is_deprecated {
+                            return None;
+                        }
+                        Some((
                             k.as_str(),
                             AnnotatedReference {
                                 path: v.as_str(),
                                 optional: false,
                                 nullable: false,
-                                // sum-type variants are KEPT even if deprecated, but we still
-                                // surface the flag so codegen can annotate them appropriately
-                                is_deprecated: ctx.ref_targets_deprecated(v.as_str()),
+                                is_deprecated,
                             },
-                        )
+                        ))
                     })
                     .collect(),
             }),
@@ -461,18 +467,25 @@ fn parse_object<'a>(
             value: match union_types
                 .iter()
                 .enumerate()
-                .map(
+                .filter_map(
                     |(idx, schema)| match parse_schema(ctx, schema, false, nullable) {
-                        Ok(obj) => Ok(types::SumVariant {
-                            name: match &obj {
-                                IAST::Reference(refe) => strip_ref_prefix(refe.path).to_string(),
-                                _ => idx.to_string(),
-                            },
-                            typ: obj,
-                        }),
-                        Err(e) => {
-                            return Err(e);
+                        Ok(obj) => {
+                            // Fully drop deprecated variants: a deprecated arm must
+                            // not exist client-side at all (no decode, no construct).
+                            if ctx.args.ignore_deprecated_fields && iast_is_deprecated(&obj) {
+                                return None;
+                            }
+                            Some(Ok(types::SumVariant {
+                                name: match &obj {
+                                    IAST::Reference(refe) => {
+                                        strip_ref_prefix(refe.path).to_string()
+                                    }
+                                    _ => idx.to_string(),
+                                },
+                                typ: obj,
+                            }))
                         }
+                        Err(e) => Some(Err(e)),
                     },
                 )
                 .collect::<Result<Vec<_>, _>>()

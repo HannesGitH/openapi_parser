@@ -1204,6 +1204,68 @@ fn sum_type_union_exposes_variant_constructors_and_match() {
     assert_contains(pet, "dog,", "match must expose a `dog` callback parameter");
 }
 
+/// With `ignore_deprecated_fields` on, a `oneOf` arm that references a
+/// deprecated scheme is dropped entirely -- the variant must not exist on the
+/// client at all: no redirecting constructor, no `match` arm, and no branch in
+/// the try-each `fromJson`. Non-deprecated arms are unaffected.
+#[test]
+fn deprecated_sum_type_variant_is_fully_removed() {
+    let spec = r##"{
+        "openapi": "3.1.0",
+        "info": { "title": "t", "version": "0" },
+        "components": {
+            "schemas": {
+                "Cat": {
+                    "type": "object",
+                    "properties": { "meow": { "type": "string" } },
+                    "required": ["meow"]
+                },
+                "Dog": {
+                    "type": "object",
+                    "deprecated": true,
+                    "properties": { "bark": { "type": "string" } },
+                    "required": ["bark"]
+                },
+                "Pet": {
+                    "oneOf": [
+                        { "$ref": "#/components/schemas/Cat" },
+                        { "$ref": "#/components/schemas/Dog" }
+                    ]
+                }
+            }
+        },
+        "paths": {}
+    }"##;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("build tokio runtime");
+    let files: std::collections::HashMap<String, String> = rt
+        .block_on(openapi_parser::generate_dart_files(spec, true))
+        .expect("generation should succeed")
+        .into_iter()
+        .map(|f| (f.path.to_string_lossy().replace('\\', "/"), f.content))
+        .collect();
+
+    let pet = file(&files, "schemes/Pet.dart");
+    assert_contains(
+        pet,
+        ".cat(BEAMCatModel value) =",
+        "the non-deprecated Cat arm must remain",
+    );
+    assert_contains(pet, "cat,", "match must still expose the `cat` arm");
+    assert_not_contains(
+        pet,
+        "BEAMDogModel",
+        "the deprecated Dog arm must be fully removed from the union",
+    );
+    assert_not_contains(
+        pet,
+        ".dog(",
+        "the deprecated arm must not expose a redirecting constructor",
+    );
+}
+
 // ---------------------------------------------------------------------------
 // `Never` / `UnknownBEAMObject`
 //
