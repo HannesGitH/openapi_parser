@@ -33,6 +33,7 @@ pub async fn generate_dart_files(
             &spec,
             GenerationArgs {
                 ignore_deprecated_fields,
+                const_constructors: true,
             },
         )
         .await

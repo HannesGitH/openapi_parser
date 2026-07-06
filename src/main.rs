@@ -3,6 +3,9 @@
 // needs back into scope from the library crate.
 use openapi_parser::generate::*;
 
+use clap::{Parser, ValueEnum};
+
+#[derive(Clone, Copy, ValueEnum)]
 enum DestinationLanguage {
     Dart,
 }
@@ -47,42 +50,40 @@ async fn fetch_spec_json(url: &str) -> Result<String, reqwest::Error> {
     Ok(body)
 }
 
+/// Generate client code from an OpenAPI spec.
+#[derive(Parser)]
+#[command(version, about)]
+struct Cli {
+    /// URL of the OpenAPI spec to fetch.
+    #[arg(long, short = 'u')]
+    spec_url: String,
+
+    /// Directory to write the generated files into.
+    #[arg(long, short = 'o', default_value = "out")]
+    out_dir: std::path::PathBuf,
+
+    /// Target language for the generated code.
+    #[arg(long, short = 'd', default_value = "dart")]
+    destination_language: DestinationLanguage,
+
+    /// Keep properties/parameters that reference deprecated schemes.
+    #[arg(long)]
+    skip_deprecated_removal: bool,
+
+    /// Emit `const` constructors (and `final` properties) for generated types.
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    const_constructors: bool,
+}
+
 #[tokio::main]
 async fn main() {
-    // parse args from the following format
-    // --spec-url/-u <spec-url> --out-dir/-o <out-dir> --destination-language/-d <destination-language>
-    let mut args = std::env::args().skip(1);
-    let mut spec_url = None;
-    let mut out_dir = None;
-    let mut destination_language = None;
-    let mut skip_deprecated_removal = false;
+    let cli = Cli::parse();
 
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--spec-url" | "-u" => {
-                spec_url = args.next();
-            }
-            "--out-dir" | "-o" => {
-                out_dir = args.next().map(std::path::PathBuf::from);
-            }
-            "--destination-language" | "-d" => {
-                destination_language = args.next().map(|lang| match lang.as_str() {
-                    "dart" => DestinationLanguage::Dart,
-                    _ => panic!("Unsupported destination language"),
-                });
-            }
-            "--skip-deprecated-removal" => {
-                skip_deprecated_removal = true;
-            }
-            _ => panic!("Unknown argument: {}", arg),
-        }
-    }
-
-    let spec_url = spec_url.unwrap_or_else(|| panic!("Missing required argument: --spec-url/-u"));
-
-    let out_dir = out_dir.unwrap_or_else(|| std::path::PathBuf::from("out"));
-
-    let destination_language = destination_language.unwrap_or(DestinationLanguage::Dart);
+    let spec_url = cli.spec_url;
+    let out_dir = cli.out_dir;
+    let destination_language = cli.destination_language;
+    let skip_deprecated_removal = cli.skip_deprecated_removal;
+    let const_constructors = cli.const_constructors;
 
     println!("getting spec");
     let json = match fetch_spec_json(&spec_url).await {
@@ -106,6 +107,7 @@ async fn main() {
             &spec,
             GenerationArgs {
                 ignore_deprecated_fields: !skip_deprecated_removal,
+                const_constructors,
             },
         )
         .await

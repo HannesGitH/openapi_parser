@@ -1,6 +1,8 @@
 #[derive(Debug, Clone)]
 pub struct GenerationArgs {
     pub ignore_deprecated_fields: bool,
+    /// Emit `const` constructors (and `final` properties) for generated types.
+    pub const_constructors: bool,
 }
 
 pub trait Generator {

@@ -81,7 +81,7 @@ impl<'a> SchemeAdder<'a> {
                     "
 class BEAM{}Model implements BEAMSerde {{
 
-    BEAM{}Model(this.value);
+    const BEAM{}Model(this.value);
     final BEAM{}NonNullModel? value;
     factory BEAM{}Model.fromJson(Map<String, dynamic>? json) {{
         if (json == null) {{
