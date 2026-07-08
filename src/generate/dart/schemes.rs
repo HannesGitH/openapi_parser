@@ -1138,7 +1138,17 @@ class BEAM{}Model implements BEAMSerde {{
         }
 
         let mut content = String::new();
-        content.push_str("import 'dart:collection';\n");
+        // `UnmodifiableListView` (dart:collection) is only referenced when the
+        // type has at least one list property.
+        let needs_collection = properties.iter().any(|p| {
+            matches!(
+                p.prop_type,
+                PropertyType::Primitive(PrimitivePropertyType::List { .. })
+            )
+        });
+        if needs_collection {
+            content.push_str("import 'dart:collection';\n");
+        }
         content.push_str(&format!(
             "import '../{}utils/serde.dart';\n",
             "../".repeat(depth)
