@@ -1133,6 +1133,7 @@ class BEAM{}Model implements BEAMSerde {{
         }
 
         let mut content = String::new();
+        content.push_str("import 'dart:collection';\n");
         content.push_str(&format!(
             "import '../{}utils/serde.dart';\n",
             "../".repeat(depth)
@@ -1185,13 +1186,12 @@ class BEAM{}Model implements BEAMSerde {{
         content.push_str("\n\n  @override\n  Map<String,dynamic> toJson() => {\n");
         for prop in properties.iter() {
             content.push_str(&format!(
-                "    {}'{}': {}{},\n",
-                if prop.optional {
-                    format!("if({} != null) ", create_property_name(prop.name))
-                } else {
-                    "".to_string()
-                },
+                // Null-aware map element (`'k': ?v`): the entry is omitted
+                // entirely when the value is null, so nullable/optional
+                // properties never serialize as an explicit `null`.
+                "    '{}': {}{}{},\n",
                 prop.name,
+                if prop.nullable { "?" } else { "" },
                 create_property_name(prop.name),
                 if let PropertyType::Normal = prop.prop_type {
                     String::from("?.toJson()")
@@ -1233,7 +1233,7 @@ class BEAM{}Model implements BEAMSerde {{
                             inner_is_primitive,
                         } => {
                             format!(
-                                "{} (json['{}'] as List).map((e) => {}).toList()",
+                                "{} UnmodifiableListView((json['{}'] as List).map((e) => {}).toList())",
                                 if prop.nullable {
                                     format!("json['{}'] == null ? null : ", prop.name)
                                 } else {
@@ -1393,6 +1393,9 @@ struct Property<'a> {
     name: &'a str,
     typ: String,
     nullable: bool,
+    // Retained for the upcoming lazy getter path (absent-vs-null); the eager
+    // toJson now folds optional into `nullable` via null-aware elements.
+    #[allow(dead_code)]
     optional: bool,
     doc_str: String,
     prop_type: PropertyType,
