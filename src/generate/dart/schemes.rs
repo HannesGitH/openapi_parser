@@ -1149,73 +1149,138 @@ class BEAM{}Model implements BEAMSerde {{
         }
         content.push_str("\n\n");
 
-        content.push_str(&format!(
-            "{}class {} implements BEAMSerde {{\n",
-            doc_str, class_name
-        ));
-        for prop in properties.iter() {
+        if self.lazy {
+            // Map-backed lazy model: a single backing map is the source of
+            // truth. Properties are getters that parse their slice on read,
+            // so malformed fields only throw when actually accessed.
+            let raw_field = if self.vars_should_be_final {
+                "_rawValue"
+            } else {
+                "rawValue"
+            };
             content.push_str(&format!(
-                "\n{}  {}{}{} {};\n",
-                prop.doc_str,
+                "{}class {} implements BEAMSerde {{\n",
+                doc_str, class_name
+            ));
+            content.push_str(&format!("\n  final Map<String, dynamic> {};\n", raw_field));
+            // Zero-work wrap on the decode path; const when --unmodifiable.
+            content.push_str(&format!(
+                "\n  {}{}.fromJson(this.{});\n",
                 if self.vars_should_be_final {
-                    "final "
+                    "const "
                 } else {
                     ""
                 },
-                prop.typ,
-                if prop.nullable { "?" } else { "" },
-                create_property_name(prop.name)
+                class_name,
+                raw_field
             ));
-        }
-
-        // constructor
-        content.push_str(&format!(
-            "\n\n  {}{}({{\n",
-            if self.vars_should_be_final {
-                "const "
-            } else {
-                ""
-            },
-            class_name
-        ));
-        for prop in properties.iter() {
+            // Typed constructor for building outgoing values; eagerly builds
+            // the backing map (hence never const).
+            content.push_str(&format!("\n  {}({{\n", class_name));
+            for prop in properties.iter() {
+                content.push_str(&format!(
+                    "    {}{}{} {},\n",
+                    if !prop.nullable { "required " } else { "" },
+                    prop.typ,
+                    if prop.nullable { "?" } else { "" },
+                    create_property_name(prop.name)
+                ));
+            }
+            content.push_str(&format!("  }}) : {} = {{\n", raw_field));
+            for prop in properties.iter() {
+                content.push_str(&format!(
+                    "    '{}': {}{},\n",
+                    prop.name,
+                    if prop.nullable { "?" } else { "" },
+                    prop_to_json_expr(prop),
+                ));
+            }
+            content.push_str("  };\n");
+            // toJson returns the backing map verbatim (preserves unknown keys).
             content.push_str(&format!(
-                "    {}this.{},\n",
-                if !prop.nullable { "required " } else { "" },
-                create_property_name(prop.name)
+                "\n  @override\n  Map<String,dynamic> toJson() => {};\n",
+                raw_field
             ));
-        }
-        content.push_str("  });\n");
-
-        //to json
-        content.push_str("\n\n  @override\n  Map<String,dynamic> toJson() => {\n");
-        for prop in properties.iter() {
+            for prop in properties.iter() {
+                content.push_str(&format!(
+                    "\n{}  {}{} get {} => {};\n",
+                    prop.doc_str,
+                    prop.typ,
+                    if prop.nullable { "?" } else { "" },
+                    create_property_name(prop.name),
+                    prop_from_json_expr(prop, raw_field),
+                ));
+            }
+            content.push_str("}\n");
+        } else {
             content.push_str(&format!(
-                // Null-aware map element (`'k': ?v`): the entry is omitted
-                // entirely when the value is null, so nullable/optional
-                // properties never serialize as an explicit `null`.
-                "    '{}': {}{},\n",
-                prop.name,
-                if prop.nullable { "?" } else { "" },
-                prop_to_json_expr(prop),
+                "{}class {} implements BEAMSerde {{\n",
+                doc_str, class_name
             ));
-        }
-        content.push_str("  };\n");
+            for prop in properties.iter() {
+                content.push_str(&format!(
+                    "\n{}  {}{}{} {};\n",
+                    prop.doc_str,
+                    if self.vars_should_be_final {
+                        "final "
+                    } else {
+                        ""
+                    },
+                    prop.typ,
+                    if prop.nullable { "?" } else { "" },
+                    create_property_name(prop.name)
+                ));
+            }
 
-        //from json
-        content.push_str(&format!(
-            "\n  factory {}.fromJson(Map<String,dynamic> json) => {}(\n",
-            class_name, class_name
-        ));
-        for prop in properties.iter() {
+            // constructor
             content.push_str(&format!(
-                "    {}: {},\n",
-                create_property_name(prop.name),
-                prop_from_json_expr(prop, "json"),
+                "\n\n  {}{}({{\n",
+                if self.vars_should_be_final {
+                    "const "
+                } else {
+                    ""
+                },
+                class_name
             ));
+            for prop in properties.iter() {
+                content.push_str(&format!(
+                    "    {}this.{},\n",
+                    if !prop.nullable { "required " } else { "" },
+                    create_property_name(prop.name)
+                ));
+            }
+            content.push_str("  });\n");
+
+            //to json
+            content.push_str("\n\n  @override\n  Map<String,dynamic> toJson() => {\n");
+            for prop in properties.iter() {
+                content.push_str(&format!(
+                    // Null-aware map element (`'k': ?v`): the entry is omitted
+                    // entirely when the value is null, so nullable/optional
+                    // properties never serialize as an explicit `null`.
+                    "    '{}': {}{},\n",
+                    prop.name,
+                    if prop.nullable { "?" } else { "" },
+                    prop_to_json_expr(prop),
+                ));
+            }
+            content.push_str("  };\n");
+
+            //from json
+            content.push_str(&format!(
+                "\n  factory {}.fromJson(Map<String,dynamic> json) => {}(\n",
+                class_name, class_name
+            ));
+            for prop in properties.iter() {
+                content.push_str(&format!(
+                    "    {}: {},\n",
+                    create_property_name(prop.name),
+                    prop_from_json_expr(prop, "json"),
+                ));
+            }
+            content.push_str("  );\n");
+            content.push_str("}\n");
         }
-        content.push_str("  );\n");
-        content.push_str("}\n");
         content.push_str(&extra_content);
         file_dependencies.extend(file_sub_dependencies.into_iter().map(|f| File {
             path: std::path::PathBuf::from(format!("{}/{}", name, f.path.display())),

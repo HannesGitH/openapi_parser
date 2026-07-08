@@ -53,6 +53,22 @@ fn generate(spec_json: &str) -> std::collections::HashMap<String, String> {
         .collect()
 }
 
+/// Like [`generate`], but drives the generator in `--lazy` mode (map-backed
+/// models with getters that parse on read).
+fn generate_lazy(spec_json: &str) -> std::collections::HashMap<String, String> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("build tokio runtime");
+    let files: Vec<File> = rt
+        .block_on(openapi_parser::generate_dart_files(spec_json, false, true))
+        .expect("generation should succeed");
+    files
+        .into_iter()
+        .map(|f| (f.path.to_string_lossy().replace('\\', "/"), f.content))
+        .collect()
+}
+
 /// Look up a generated file by its forward-slash path, panicking with a
 /// helpful message (including the list of available paths) if missing.
 fn file<'a>(files: &'a std::collections::HashMap<String, String>, path: &str) -> &'a str {
@@ -1440,5 +1456,141 @@ fn endpoint_request_body_ref_to_never_calls_tojson() {
         route,
         "body: body?.toJson()",
         "$ref-to-never request body must serialize via .toJson",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Lazy mode (`--lazy`): map-backed models with parse-on-read getters.
+// ---------------------------------------------------------------------------
+
+/// The spec used by the lazy-mode tests: an object with a required primitive,
+/// a nullable primitive, a scalar object ref, and a list of object refs.
+const LAZY_SPEC: &str = r##"{
+    "openapi": "3.1.0",
+    "info": { "title": "t", "version": "0" },
+    "components": {
+        "schemas": {
+            "User": {
+                "type": "object",
+                "properties": { "name": { "type": "string" } },
+                "required": ["name"]
+            },
+            "Req": {
+                "type": "object",
+                "properties": {
+                    "name":  { "type": "string" },
+                    "note":  { "type": "string" },
+                    "user":  { "$ref": "#/components/schemas/User" },
+                    "users": {
+                        "type": "array",
+                        "items": { "$ref": "#/components/schemas/User" }
+                    }
+                },
+                "required": ["name", "user", "users"]
+            }
+        }
+    },
+    "paths": {}
+}"##;
+
+#[test]
+fn lazy_product_type_is_map_backed_with_const_fromjson() {
+    let files = generate_lazy(LAZY_SPEC);
+    let req = file(&files, "schemes/Req.dart");
+
+    assert_contains(
+        req,
+        "import 'dart:collection';",
+        "lazy needs dart:collection",
+    );
+    assert_contains(
+        req,
+        "final Map<String, dynamic> _rawValue;",
+        "lazy model is backed by a private raw map (under --unmodifiable)",
+    );
+    assert_contains(
+        req,
+        "const BEAMReqModel.fromJson(this._rawValue);",
+        "decode path is a zero-work const wrap",
+    );
+    assert_contains(
+        req,
+        "Map<String,dynamic> toJson() => _rawValue;",
+        "toJson returns the backing map verbatim",
+    );
+    // The eager typed-field + validating-factory shape must be gone.
+    assert_not_contains(
+        req,
+        "factory BEAMReqModel.fromJson(Map<String,dynamic> json)",
+        "lazy must not emit the eager validating factory",
+    );
+}
+
+#[test]
+fn lazy_getters_parse_on_read() {
+    let files = generate_lazy(LAZY_SPEC);
+    let req = file(&files, "schemes/Req.dart");
+
+    // Required primitive: checked cast against the raw map on read.
+    assert_contains(
+        req,
+        "String get name => ((val){ if (val is String) return val;",
+        "required primitive getter casts from _rawValue",
+    );
+    assert_contains(req, "})(_rawValue['name'])", "getter reads its own slice");
+    // Nullable primitive: getter is nullable.
+    assert_contains(
+        req,
+        "String? get note =>",
+        "nullable primitive getter is nullable",
+    );
+    // Scalar object: getter wraps via the child's fromJson.
+    assert_contains(
+        req,
+        "BEAMUserModel get user",
+        "scalar object getter (required -> non-nullable)",
+    );
+    assert_contains(
+        req,
+        "BEAMUserModel.fromJson(_rawValue['user'])",
+        "scalar object getter wraps child via fromJson",
+    );
+    // List of objects: unmodifiable view, each element wrapped.
+    assert_contains(
+        req,
+        "UnmodifiableListView((_rawValue['users'] as List).map((e) => BEAMUserModel.fromJson(e)).toList())",
+        "object list getter builds an unmodifiable, per-element-wrapped view",
+    );
+}
+
+#[test]
+fn lazy_building_constructor_uses_null_aware_elements() {
+    let files = generate_lazy(LAZY_SPEC);
+    let req = file(&files, "schemes/Req.dart");
+
+    // Required params keep `required`; nullable ones are plain optional named.
+    assert_contains(
+        req,
+        "required String name,",
+        "required primitive ctor param",
+    );
+    assert_contains(req, "String? note,", "nullable primitive ctor param");
+    // The initializer builds the backing map with null-aware elements for
+    // nullable fields and plain entries for required ones.
+    assert_contains(req, ") : _rawValue = {", "ctor initializes the backing map");
+    assert_contains(
+        req,
+        "'name': name,",
+        "required primitive serialized directly",
+    );
+    assert_contains(
+        req,
+        "'note': ?note,",
+        "nullable primitive uses null-aware element",
+    );
+    assert_contains(
+        req,
+        "'users': users?.map((e) => e.toJson()).toList(),",
+        "object list serialized",
     );
 }
