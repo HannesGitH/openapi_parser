@@ -1194,30 +1194,10 @@ class BEAM{}Model implements BEAMSerde {{
                 // Null-aware map element (`'k': ?v`): the entry is omitted
                 // entirely when the value is null, so nullable/optional
                 // properties never serialize as an explicit `null`.
-                "    '{}': {}{}{},\n",
+                "    '{}': {}{},\n",
                 prop.name,
                 if prop.nullable { "?" } else { "" },
-                create_property_name(prop.name),
-                if let PropertyType::Normal = prop.prop_type {
-                    String::from("?.toJson()")
-                } else {
-                    match &prop.prop_type {
-                        PropertyType::Primitive(PrimitivePropertyType::List {
-                            inner_is_primitive,
-                            ..
-                        }) => {
-                            format!(
-                                "?.map((e) => {}).toList()",
-                                if *inner_is_primitive {
-                                    "e"
-                                } else {
-                                    "e.toJson()"
-                                }
-                            )
-                        }
-                        _ => "".to_string(),
-                    }
-                }
+                prop_to_json_expr(prop),
             ));
         }
         content.push_str("  };\n");
@@ -1231,43 +1211,7 @@ class BEAM{}Model implements BEAMSerde {{
             content.push_str(&format!(
                 "    {}: {},\n",
                 create_property_name(prop.name),
-                if let PropertyType::Primitive(prim) = &prop.prop_type {
-                    match prim {
-                        PrimitivePropertyType::List {
-                            inner_type,
-                            inner_is_primitive,
-                        } => {
-                            format!(
-                                "{} UnmodifiableListView((json['{}'] as List).map((e) => {}).toList())",
-                                if prop.nullable {
-                                    format!("json['{}'] == null ? null : ", prop.name)
-                                } else {
-                                    "".to_string()
-                                },
-                                prop.name,
-                                if *inner_is_primitive {
-                                    format!("e as {}", inner_type)
-                                } else {
-                                    format!("{}.fromJson(e)", inner_type)
-                                },
-                            )
-                        }
-                        PrimitivePropertyType::Default => {
-                            format!("((val){{ if (val is {}{}) return val; throw BEAMWrongTypeError('$val is not of type {} for property {}'); }})(json['{}'])", prop.typ, if prop.nullable { "?" } else { "" }, prop.typ, prop.name, prop.name)
-                        }
-                    }
-                } else {
-                    format!(
-                        "{}{}.fromJson(json['{}'])",
-                        if prop.nullable {
-                            format!("json['{}'] == null ? null : ", prop.name)
-                        } else {
-                            "".to_string()
-                        },
-                        prop.typ,
-                        prop.name,
-                    )
-                }
+                prop_from_json_expr(prop, "json"),
             ));
         }
         content.push_str("  );\n");
@@ -1375,6 +1319,79 @@ pub fn create_property_name(name: &str) -> String {
         format!("$private{}", sanitized)
     } else {
         sanitized
+    }
+}
+
+/// The Dart expression that reads property `prop` out of a decoded map that
+/// is accessed via the identifier `src` (e.g. `"json"` for the eager
+/// `fromJson` factory, or `"rawValue"` / `"_rawValue"` for a lazy getter),
+/// applying the same casting/parsing/validation in every mode.
+fn prop_from_json_expr(prop: &Property, src: &str) -> String {
+    if let PropertyType::Primitive(prim) = &prop.prop_type {
+        match prim {
+            PrimitivePropertyType::List {
+                inner_type,
+                inner_is_primitive,
+            } => format!(
+                "{} UnmodifiableListView(({}['{}'] as List).map((e) => {}).toList())",
+                if prop.nullable {
+                    format!("{}['{}'] == null ? null : ", src, prop.name)
+                } else {
+                    "".to_string()
+                },
+                src,
+                prop.name,
+                if *inner_is_primitive {
+                    format!("e as {}", inner_type)
+                } else {
+                    format!("{}.fromJson(e)", inner_type)
+                },
+            ),
+            PrimitivePropertyType::Default => format!(
+                "((val){{ if (val is {}{}) return val; throw BEAMWrongTypeError('$val is not of type {} for property {}'); }})({}['{}'])",
+                prop.typ,
+                if prop.nullable { "?" } else { "" },
+                prop.typ,
+                prop.name,
+                src,
+                prop.name,
+            ),
+        }
+    } else {
+        format!(
+            "{}{}.fromJson({}['{}'])",
+            if prop.nullable {
+                format!("{}['{}'] == null ? null : ", src, prop.name)
+            } else {
+                "".to_string()
+            },
+            prop.typ,
+            src,
+            prop.name,
+        )
+    }
+}
+
+/// The Dart expression that serializes property `prop` back to its JSON
+/// value, reading from the Dart identifier `create_property_name(prop.name)`.
+/// Shared by the eager `toJson` and the lazy map-building constructor. The
+/// caller adds the `'key':` prefix and the null-aware `?` element marker.
+fn prop_to_json_expr(prop: &Property) -> String {
+    let ident = create_property_name(prop.name);
+    match &prop.prop_type {
+        PropertyType::Normal => format!("{}?.toJson()", ident),
+        PropertyType::Primitive(PrimitivePropertyType::List {
+            inner_is_primitive, ..
+        }) => format!(
+            "{}?.map((e) => {}).toList()",
+            ident,
+            if *inner_is_primitive {
+                "e"
+            } else {
+                "e.toJson()"
+            },
+        ),
+        PropertyType::Primitive(PrimitivePropertyType::Default) => ident,
     }
 }
 
