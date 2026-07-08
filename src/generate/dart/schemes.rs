@@ -12,6 +12,9 @@ pub(super) struct SchemeAdder<'a> {
     class_prefix: &'a str,
     class_suffix: &'a str,
     vars_should_be_final: bool,
+    /// Emit map-backed lazy models instead of eager typed models.
+    #[allow(dead_code)]
+    lazy: bool,
     complete_iast: Option<&'a intermediate::IntermediateFormat<'a>>,
 }
 
@@ -20,11 +23,13 @@ impl<'a> SchemeAdder<'a> {
         class_prefix: &'a str,
         class_suffix: &'a str,
         vars_should_be_final: bool,
+        lazy: bool,
     ) -> Self {
         Self {
             class_prefix,
             class_suffix,
             vars_should_be_final,
+            lazy,
             complete_iast: None,
         }
     }

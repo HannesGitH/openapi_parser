@@ -34,7 +34,8 @@ impl super::Generator for DartGenerator {
                 return Err(format!("parsing spec to intermediate error: {:?}", e));
             }
         };
-        let mut scheme_adder = schemes::SchemeAdder::new(class_prefix, class_suffix, args.const_constructors);
+        let mut scheme_adder =
+            schemes::SchemeAdder::new(class_prefix, class_suffix, args.unmodifiable, args.lazy);
         scheme_adder.set_complete_iast(&intermediate);
         let endpoint_adder = endpoints::EndpointAdder::new(&scheme_adder, &intermediate);
         let mut scheme_files = Vec::new();

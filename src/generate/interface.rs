@@ -1,8 +1,13 @@
 #[derive(Debug, Clone)]
 pub struct GenerationArgs {
     pub ignore_deprecated_fields: bool,
-    /// Emit `const` constructors (and `final` properties) for generated types.
-    pub const_constructors: bool,
+    /// Emit immutable/unmodifiable types: `final` properties + `const`
+    /// constructors in eager mode, and a private `_rawValue` in lazy mode.
+    pub unmodifiable: bool,
+    /// Emit map-backed lazy models (properties become getters that parse
+    /// `rawValue` on read) instead of eager typed models that parse in
+    /// `fromJson`.
+    pub lazy: bool,
 }
 
 pub trait Generator {

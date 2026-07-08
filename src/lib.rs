@@ -26,6 +26,7 @@ use generate::{DartGenerator, File, GenerationArgs, Generator};
 pub async fn generate_dart_files(
     spec_json: &str,
     ignore_deprecated_fields: bool,
+    lazy: bool,
 ) -> Result<Vec<File>, String> {
     let spec = oas3::from_json(spec_json).map_err(|e| format!("parse spec: {:?}", e))?;
     DartGenerator
@@ -33,7 +34,8 @@ pub async fn generate_dart_files(
             &spec,
             GenerationArgs {
                 ignore_deprecated_fields,
-                const_constructors: true,
+                unmodifiable: true,
+                lazy,
             },
         )
         .await

@@ -70,9 +70,15 @@ struct Cli {
     #[arg(long)]
     skip_deprecated_removal: bool,
 
-    /// Emit `const` constructors (and `final` properties) for generated types.
+    /// Emit immutable/unmodifiable types: `final` properties + `const`
+    /// constructors (eager) and a private `_rawValue` (lazy).
     #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
-    const_constructors: bool,
+    unmodifiable: bool,
+
+    /// Emit map-backed lazy models (properties parse on read) instead of
+    /// eager typed models that parse in `fromJson`.
+    #[arg(long, default_value_t = false, action = clap::ArgAction::Set)]
+    lazy: bool,
 }
 
 #[tokio::main]
@@ -83,7 +89,8 @@ async fn main() {
     let out_dir = cli.out_dir;
     let destination_language = cli.destination_language;
     let skip_deprecated_removal = cli.skip_deprecated_removal;
-    let const_constructors = cli.const_constructors;
+    let unmodifiable = cli.unmodifiable;
+    let lazy = cli.lazy;
 
     println!("getting spec");
     let json = match fetch_spec_json(&spec_url).await {
@@ -107,7 +114,8 @@ async fn main() {
             &spec,
             GenerationArgs {
                 ignore_deprecated_fields: !skip_deprecated_removal,
-                const_constructors,
+                unmodifiable,
+                lazy,
             },
         )
         .await

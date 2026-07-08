@@ -45,7 +45,7 @@ fn generate(spec_json: &str) -> std::collections::HashMap<String, String> {
         .build()
         .expect("build tokio runtime");
     let files: Vec<File> = rt
-        .block_on(openapi_parser::generate_dart_files(spec_json, false))
+        .block_on(openapi_parser::generate_dart_files(spec_json, false, false))
         .expect("generation should succeed");
     files
         .into_iter()
@@ -1241,7 +1241,7 @@ fn deprecated_sum_type_variant_is_fully_removed() {
         .build()
         .expect("build tokio runtime");
     let files: std::collections::HashMap<String, String> = rt
-        .block_on(openapi_parser::generate_dart_files(spec, true))
+        .block_on(openapi_parser::generate_dart_files(spec, true, false))
         .expect("generation should succeed")
         .into_iter()
         .map(|f| (f.path.to_string_lossy().replace('\\', "/"), f.content))
