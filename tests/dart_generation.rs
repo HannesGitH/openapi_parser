@@ -1682,3 +1682,55 @@ fn eager_sum_union_keeps_trycatch_and_no_checkconform() {
     );
     assert_not_contains(pet, "checkConform", "eager mode must not emit checkConform");
 }
+
+#[test]
+fn lazy_endpoint_still_serializes_and_parses_via_lazy_models() {
+    let spec = r##"{
+        "openapi": "3.1.0",
+        "info": { "title": "t", "version": "0" },
+        "components": {
+            "schemas": {
+                "Widget": {
+                    "type": "object",
+                    "properties": { "name": { "type": "string" } },
+                    "required": ["name"]
+                }
+            }
+        },
+        "paths": {
+            "/widgets": {
+                "post": {
+                    "requestBody": {
+                        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Widget" } } }
+                    },
+                    "responses": {
+                        "200": { "description": "", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Widget" } } } }
+                    }
+                }
+            }
+        }
+    }"##;
+    let files = generate_lazy(spec);
+
+    // The shared model is lazy (map-backed).
+    let widget = file(&files, "schemes/Widget.dart");
+    assert_contains(
+        widget,
+        "final Map<String, dynamic> _rawValue;",
+        "endpoint model is generated lazily",
+    );
+
+    // The endpoint layer is unchanged: request bodies still serialize via
+    // .toJson() and responses still parse via the model's fromJson.
+    let route = file(&files, "endpoints/routes/_widgets.dart");
+    assert_contains(
+        route,
+        "body: body?.toJson()",
+        "request body serialized via toJson",
+    );
+    assert_contains(
+        route,
+        "BEAMWidgetModel.fromJson(json)",
+        "response parsed via the lazy model's fromJson",
+    );
+}
