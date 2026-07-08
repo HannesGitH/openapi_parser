@@ -1594,3 +1594,91 @@ fn lazy_building_constructor_uses_null_aware_elements() {
         "object list serialized",
     );
 }
+
+#[test]
+fn lazy_product_emits_deep_checkconform() {
+    let files = generate_lazy(LAZY_SPEC);
+    let req = file(&files, "schemes/Req.dart");
+
+    assert_contains(
+        req,
+        "static bool checkConform(dynamic json, {bool deep = true}) {",
+        "lazy product exposes a static conformance check",
+    );
+    assert_contains(
+        req,
+        "if (json is! Map<String, dynamic>) return false;",
+        "non-map json never conforms to an object",
+    );
+    assert_contains(req, "(json['name'] is String)", "required primitive check");
+    assert_contains(
+        req,
+        "(json['note'] == null || json['note'] is String)",
+        "nullable primitive tolerates null/absent",
+    );
+    assert_contains(
+        req,
+        "BEAMUserModel.checkConform(json['user'], deep: deep)",
+        "object field recurses via the child's checkConform",
+    );
+    assert_contains(
+        req,
+        "(json['users'] as List).every((e) => BEAMUserModel.checkConform(e, deep: deep))",
+        "object-list elements are checked when deep",
+    );
+}
+
+const PET_SPEC: &str = r##"{
+    "openapi": "3.1.0",
+    "info": { "title": "t", "version": "0" },
+    "components": {
+        "schemas": {
+            "Cat": { "type": "object", "properties": { "meow": { "type": "string" } }, "required": ["meow"] },
+            "Dog": { "type": "object", "properties": { "bark": { "type": "string" } }, "required": ["bark"] },
+            "Pet": { "oneOf": [ { "$ref": "#/components/schemas/Cat" }, { "$ref": "#/components/schemas/Dog" } ] }
+        }
+    },
+    "paths": {}
+}"##;
+
+#[test]
+fn lazy_sum_union_discriminates_via_checkconform() {
+    let files = generate_lazy(PET_SPEC);
+    let pet = file(&files, "schemes/Pet.dart");
+
+    // Discriminator picks the first variant whose checkConform accepts json.
+    assert_contains(
+        pet,
+        "if (BEAMCatModel.checkConform(json)) return BEAMPetCatModel_.fromJson(json);",
+        "lazy union discriminates by conformance, not by catching throws",
+    );
+    assert_contains(
+        pet,
+        "if (BEAMDogModel.checkConform(json)) return BEAMPetDogModel_.fromJson(json);",
+        "second arm",
+    );
+    // The union itself is conformable (any variant conforms).
+    assert_contains(
+        pet,
+        "static bool checkConform(dynamic json, {bool deep = true}) =>",
+        "union exposes checkConform for nesting",
+    );
+    // Lazy must NOT use the eager try/catch discriminator.
+    assert_not_contains(
+        pet,
+        "final errors = <String,Object>",
+        "no eager try/catch under --lazy",
+    );
+}
+
+#[test]
+fn eager_sum_union_keeps_trycatch_and_no_checkconform() {
+    let files = generate(PET_SPEC);
+    let pet = file(&files, "schemes/Pet.dart");
+    assert_contains(
+        pet,
+        "final errors = <String,Object>",
+        "eager keeps try/catch fromJson",
+    );
+    assert_not_contains(pet, "checkConform", "eager mode must not emit checkConform");
+}

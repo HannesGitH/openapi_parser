@@ -79,4 +79,9 @@ class UnknownBEAMObject implements BEAMSerde {
 
   factory UnknownBEAMObject.fromJson(dynamic json) =>
       UnknownBEAMObject(rawValue: json);
+
+  /// `Never`/unknown accepts any JSON, so it always conforms. Present so the
+  /// lazy union discriminator can call `checkConform` uniformly on every
+  /// `BEAMSerde` value type.
+  static bool checkConform(dynamic json, {bool deep = true}) => true;
 }
