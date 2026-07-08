@@ -70,14 +70,15 @@ struct Cli {
     #[arg(long)]
     skip_deprecated_removal: bool,
 
-    /// Emit immutable/unmodifiable types: `final` properties + `const`
-    /// constructors (eager) and a private `_rawValue` (lazy).
-    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
-    unmodifiable: bool,
+    /// Emit mutable types: non-`final` properties with public backing state,
+    /// instead of the default immutable `final`/`const` (eager) or private
+    /// `_rawValue` (lazy) output.
+    #[arg(long)]
+    modifiable: bool,
 
     /// Emit map-backed lazy models (properties parse on read) instead of
     /// eager typed models that parse in `fromJson`.
-    #[arg(long, default_value_t = false, action = clap::ArgAction::Set)]
+    #[arg(long)]
     lazy: bool,
 }
 
@@ -89,7 +90,7 @@ async fn main() {
     let out_dir = cli.out_dir;
     let destination_language = cli.destination_language;
     let skip_deprecated_removal = cli.skip_deprecated_removal;
-    let unmodifiable = cli.unmodifiable;
+    let unmodifiable = !cli.modifiable;
     let lazy = cli.lazy;
 
     println!("getting spec");

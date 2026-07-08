@@ -14,12 +14,12 @@ openapi_parser -u $spec_url -o $out_dir -d $target_lang
 
 ### options
 
-- `--unmodifiable` (default `true`): emit immutable types. In the default
-  (eager) mode this means `final` properties and `const` constructors; in
-  `--lazy` mode the backing map is a private `_rawValue`. Pass
-  `--unmodifiable false` to expose mutable/public state.
-- `--lazy` (default `false`): emit **map-backed lazy** models instead of eager
-  typed ones (see below).
+- `--modifiable`: expose mutable/public state. By default types are
+  immutable — in the default (eager) mode this means `final` properties
+  and `const` constructors; in `--lazy` mode the backing map is a private
+  `_rawValue`.
+- `--lazy`: emit **map-backed lazy** models instead of eager typed ones
+  (see below).
 - `--skip-deprecated-removal`: keep properties/parameters that reference
   deprecated schemes.
 
@@ -31,8 +31,8 @@ network boundary).
 
 With `--lazy`, each schema is instead backed by a single `rawValue` map:
 
-- `fromJson` just wraps the decoded map (a `const` constructor under
-  `--unmodifiable`); `toJson()` returns it verbatim (unknown keys preserved).
+- `fromJson` just wraps the decoded map (a `const` constructor unless
+  `--modifiable`); `toJson()` returns it verbatim (unknown keys preserved).
 - Properties become getters that parse their slice **on read**, so a malformed
   field only throws (`BEAMWrongTypeError`) if you actually access it — tolerant
   of unexpected backend data you don't consume (Postel's law), and it avoids
