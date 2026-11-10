@@ -840,16 +840,33 @@ class BEAM{}Model implements BEAMSerde {{
         // Build variants from discrimination map
         let mut variants: Vec<DiscriminatedVariant> = Vec::new();
 
-        for (index, (discriminator_value, annotated_ref)) in discrimination.map.iter().enumerate() {
+        // Several discriminator values may map to the same schema (e.g. a
+        // `z.enum([...])` tag on one arm). Emit one wrapper class per
+        // referenced schema and collect all values that select it.
+        // `arms` keeps every (value, variant index) pair, in mapping order,
+        // for the switch expressions.
+        let mut arms: Vec<(&str, usize)> = Vec::new();
+        for (discriminator_value, annotated_ref) in discrimination.map.iter() {
             let trimmed_link = sanitize(strip_ref_prefix(annotated_ref.path));
-            variants.push(DiscriminatedVariant {
-                class_name: self.class_name(&format!("{}{}", name, trimmed_link)),
-                discriminator_value,
-                referenced_type_name: self.class_name(&trimmed_link),
-                // Discriminated arms are always `$ref`s, so use the referenced
-                // schema name.
-                short_name: short_variant_name(&trimmed_link, index),
-            });
+            let referenced_type_name = self.class_name(&trimmed_link);
+            let variant_index = match variants
+                .iter()
+                .position(|v| v.referenced_type_name == referenced_type_name)
+            {
+                Some(i) => i,
+                None => {
+                    let index = variants.len();
+                    variants.push(DiscriminatedVariant {
+                        class_name: self.class_name(&format!("{}{}", name, trimmed_link)),
+                        referenced_type_name,
+                        // Discriminated arms are always `$ref`s, so use the
+                        // referenced schema name.
+                        short_name: short_variant_name(&trimmed_link, index),
+                    });
+                    index
+                }
+            };
+            arms.push((discriminator_value, variant_index));
         }
 
         let mut content = String::new();
@@ -898,10 +915,11 @@ class BEAM{}Model implements BEAMSerde {{
         ));
         content.push_str("\t\treturn switch(discriminator) {\n");
 
-        for variant in variants.iter() {
+        for (discriminator_value, variant_index) in arms.iter() {
+            let variant = &variants[*variant_index];
             content.push_str(&format!(
                 "\t\t\t'{}' => {}_({}.fromJson(json)),\n",
-                variant.discriminator_value, variant.class_name, variant.referenced_type_name
+                discriminator_value, variant.class_name, variant.referenced_type_name
             ));
         }
 
@@ -934,10 +952,10 @@ class BEAM{}Model implements BEAMSerde {{
                 "\t\treturn switch(json['{}']) {{\n",
                 discrimination.key
             ));
-            for variant in variants.iter() {
+            for (discriminator_value, variant_index) in arms.iter() {
                 content.push_str(&format!(
                     "\t\t\t'{}' => !deep || {}.checkConform(json, deep: deep),\n",
-                    variant.discriminator_value, variant.referenced_type_name
+                    discriminator_value, variants[*variant_index].referenced_type_name
                 ));
             }
             content.push_str("\t\t\tdynamic _ => false,\n\t\t};\n\t}");
@@ -1714,11 +1732,10 @@ pub(super) struct AllowedValue<'a> {
 
 /// One arm of a discriminated union built by
 /// [`SchemeAdder::generate_discriminated_sum_type`]: the generated wrapper
-/// `class_name`, the `discriminator_value` that selects it, and the
-/// `referenced_type_name` it wraps.
-struct DiscriminatedVariant<'a> {
+/// `class_name` and the `referenced_type_name` it wraps. There is exactly one
+/// per referenced schema, even if several discriminator values select it.
+struct DiscriminatedVariant {
     class_name: String,
-    discriminator_value: &'a str,
     referenced_type_name: String,
     /// Short, lowerCamelCase arm name derived from the referenced schema,
     /// used for the redirecting constructor and `match` callback.

@@ -1734,3 +1734,69 @@ fn lazy_endpoint_still_serializes_and_parses_via_lazy_models() {
         "response parsed via the lazy model's fromJson",
     );
 }
+
+/// Several discriminator values mapping to the same schema (e.g. zod's
+/// `z.enum([...])` tag on one arm of a `discriminatedUnion`) must yield ONE
+/// wrapper class / constructor / `match` callback / import per schema, while
+/// every value still gets its own `fromJson` and `checkConform` switch arm.
+/// Before the fix each value produced a duplicate class, which didn't compile.
+#[test]
+fn discriminated_union_dedupes_values_sharing_a_schema() {
+    let spec = r##"{
+        "openapi": "3.1.0",
+        "info": { "title": "t", "version": "0" },
+        "components": {
+            "schemas": {
+                "Pending": {
+                    "type": "object",
+                    "properties": {
+                        "state": { "type": "string", "enum": ["requested", "scanned", "approved", "expired"] }
+                    },
+                    "required": ["state"]
+                },
+                "Connected": {
+                    "type": "object",
+                    "properties": { "state": { "type": "string", "enum": ["connected"] } },
+                    "required": ["state"]
+                },
+                "Poll": {
+                    "oneOf": [
+                        { "$ref": "#/components/schemas/Pending" },
+                        { "$ref": "#/components/schemas/Connected" }
+                    ],
+                    "discriminator": {
+                        "propertyName": "state",
+                        "mapping": {
+                            "requested": "#/components/schemas/Pending",
+                            "scanned": "#/components/schemas/Pending",
+                            "approved": "#/components/schemas/Pending",
+                            "expired": "#/components/schemas/Pending",
+                            "connected": "#/components/schemas/Connected"
+                        }
+                    }
+                }
+            }
+        },
+        "paths": {}
+    }"##;
+    for files in [generate(spec), generate_lazy(spec)] {
+        let poll = file(&files, "schemes/Poll.dart");
+        let count = |needle: &str| poll.matches(needle).count();
+        assert_eq!(count("class BEAMPollPendingModel_ extends"), 1, "{poll}");
+        assert_eq!(count("class BEAMPollConnectedModel_ extends"), 1, "{poll}");
+        assert_eq!(count("import '../schemes/Pending.dart';"), 1, "{poll}");
+        assert_eq!(count("factory BEAMPollModel.pending("), 1, "{poll}");
+        assert_eq!(count("T Function(BEAMPendingModel value) pending"), 1, "{poll}");
+        assert_eq!(count("BEAMPollPendingModel_ t =>"), 1, "{poll}");
+        for value in ["requested", "scanned", "approved", "expired"] {
+            assert_contains(
+                poll,
+                &format!("'{value}' => BEAMPollPendingModel_(BEAMPendingModel.fromJson(json))"),
+                "every discriminator value keeps its fromJson arm",
+            );
+        }
+    }
+    let lazy = generate_lazy(spec);
+    let poll = file(&lazy, "schemes/Poll.dart");
+    assert_eq!(poll.matches("=> !deep || BEAMPendingModel.checkConform").count(), 4, "{poll}");
+}
