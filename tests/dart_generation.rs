@@ -1618,8 +1618,8 @@ fn lazy_product_emits_deep_checkconform() {
     );
     assert_contains(
         req,
-        "BEAMUserModel.checkConform(json['user'], deep: deep)",
-        "object field recurses via the child's checkConform",
+        "(!deep || BEAMUserModel.checkConform(json['user'], deep: deep))",
+        "object field recurses via the child's checkConform only when deep",
     );
     assert_contains(
         req,

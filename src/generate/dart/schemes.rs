@@ -1625,12 +1625,14 @@ fn prop_to_json_expr(prop: &Property) -> String {
 
 /// A Dart boolean expression testing whether property `prop`, read from the
 /// map accessed via `src`, structurally conforms to its declared type.
-/// Recurses into objects/lists when the generated `deep` flag is set. Used by
-/// the lazy union discriminator, which must decide without throwing.
+/// Non-primitive properties (objects, enums, unions) and list elements are
+/// only checked when the generated `deep` flag is set; a shallow check tests
+/// just the primitive fields (and that lists are lists). Used by the lazy union
+/// discriminator, which must decide without throwing.
 fn prop_conforms_expr(prop: &Property, src: &str) -> String {
     let key = format!("{}['{}']", src, prop.name);
     let core = match &prop.prop_type {
-        PropertyType::Normal => format!("{}.checkConform({}, deep: deep)", prop.typ, key),
+        PropertyType::Normal => format!("!deep || {}.checkConform({}, deep: deep)", prop.typ, key),
         PropertyType::Primitive(PrimitivePropertyType::List {
             inner_type,
             inner_is_primitive,
