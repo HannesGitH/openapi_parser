@@ -83,9 +83,10 @@ impl<'a> SchemeAdder<'a> {
                 // The nullable wrapper conforms to null or to whatever its
                 // non-null inner type conforms to (lazy union discrimination).
                 let nullable_check_conform = format!(
-                    "\n    static bool checkConform(dynamic json, {{bool deep = true}}) =>\n        json == null || BEAM{}NonNullModel.checkConform(json, deep: deep);\n{}",
-                    sanitized_scheme_name,
-                    conforms_member("toJson()", "    ")
+                    "\n    static bool checkConform(dynamic json, {{bool deep = true}}) =>\n        json == null || BEAM{n}NonNullModel.checkConform(json, deep: deep);\n\n    {sig} =>\n        json == null ? const [] : BEAM{n}NonNullModel.checkConformityErrors(json, path: path, deep: deep);\n{m}",
+                    n = sanitized_scheme_name,
+                    sig = CONFORMITY_ERRORS_SIG,
+                    m = conforms_member("toJson()", "    ")
                 );
                 // lol irgendwann sollte man mal auf ne templating engine umsteigen
                 cpf!(
@@ -405,6 +406,111 @@ class BEAM{}Model implements BEAMSerde {{
         s
     }
 
+    /// Human-readable type name for `conformityErrors`' `expected`, matching
+    /// what `checkConform` tests against: primitive typedefs resolve to their
+    /// Dart primitive (`String`, `int`, `num`, `bool`), maps are `object`,
+    /// lists `List`, generated classes their schema name.
+    fn expected_name(&self, dart_type: &str) -> String {
+        if dart_type.starts_with("Map") {
+            return "object".to_string();
+        }
+        if dart_type.starts_with("List") {
+            return "List".to_string();
+        }
+        let Some(stripped) = dart_type
+            .strip_prefix(self.class_prefix)
+            .and_then(|t| t.strip_suffix(self.class_suffix))
+        else {
+            return dart_type.to_string();
+        };
+        let iast = self.complete_iast.unwrap();
+        let mut current = iast.schemes.iter().find(|s| sanitize(s.name) == stripped);
+        // Follow `$ref` chains to a primitive typedef (bounded for cycles).
+        for _ in 0..32 {
+            let Some(scheme) = current else { break };
+            match &scheme.obj {
+                intermediate::IAST::Primitive(p) => match &p.value {
+                    Primitive::Enum(_) | Primitive::Never => break,
+                    other => return self.expected_name(&to_dart_prim(other)),
+                },
+                intermediate::IAST::Reference(r) => current = iast.find_scheme(r.path),
+                _ => break,
+            }
+        }
+        stripped.to_string()
+    }
+
+    /// Dart statements appending property `prop`'s mismatches (read from the
+    /// map `json`) to `errors`. Mirrors [`prop_conforms_expr`] exactly so that
+    /// "no errors" coincides with `checkConform`.
+    fn prop_conformity_stmts(&self, prop: &Property) -> String {
+        let p = child_path_expr(prop.name);
+        let core = match &prop.prop_type {
+            PropertyType::Normal => format!(
+                "if (deep) errors.addAll({}.checkConformityErrors(v, path: {}, deep: deep));",
+                prop.typ, p
+            ),
+            PropertyType::Primitive(PrimitivePropertyType::List {
+                inner_type,
+                inner_is_primitive,
+                inner_expected,
+            }) => {
+                let pi = format!("{}[$i]'", &p[..p.len() - 1]);
+                let elem = if *inner_is_primitive {
+                    format!(
+                        "if (e is! {}) errors.add(BeamConformErr.mismatch({}, '{}', e));",
+                        inner_type,
+                        pi,
+                        dart_str_escape(inner_expected)
+                    )
+                } else {
+                    format!(
+                        "errors.addAll({}.checkConformityErrors(e, path: {}, deep: deep));",
+                        inner_type, pi
+                    )
+                };
+                format!(
+                    "if (v is! List) {{\n      errors.add(BeamConformErr.mismatch({}, 'List', v));\n    }} else if (deep) {{\n      for (var i = 0; i < v.length; i++) {{\n        final e = v[i];\n        {}\n      }}\n    }}",
+                    p, elem
+                )
+            }
+            PropertyType::Primitive(PrimitivePropertyType::Default) => format!(
+                "if (v is! {}) errors.add(BeamConformErr.mismatch({}, '{}', v));",
+                prop.typ,
+                p,
+                dart_str_escape(&self.expected_name(&prop.typ))
+            ),
+        };
+        let body = if prop.nullable {
+            format!("if (v != null) {{\n    {}\n    }}", core)
+        } else {
+            core
+        };
+        format!(
+            "    {{\n    final v = json['{}'];\n    {}\n    }}\n",
+            prop.name, body
+        )
+    }
+
+    /// Display name of a non-discriminated union arm for `one of A | B`.
+    fn variant_display_name(&self, variant: &SumVariantClass) -> String {
+        match &variant.special_case {
+            Some(GenerationSpecialCase {
+                reason: GenerationSpecialCaseType::Primitive,
+                type_name,
+            }) => self.expected_name(type_name),
+            Some(GenerationSpecialCase {
+                reason: GenerationSpecialCaseType::List(..),
+                ..
+            }) => "List".to_string(),
+            Some(GenerationSpecialCase {
+                reason: GenerationSpecialCaseType::Link(internal),
+                ..
+            }) => self.expected_name(&self.class_name(internal)),
+            None => variant.short_name.clone(),
+        }
+    }
+
     /// The Dart boolean expression deciding whether raw `json` matches a union
     /// variant, shared by the lazy discriminator and the union `checkConform`.
     /// `deep_arg` is "" (top-level discriminator) or ", deep: deep" (nested in
@@ -584,6 +690,9 @@ class BEAM{}Model implements BEAMSerde {{
             content.push_str(&tests.join("\n\t\t|| "));
         }
         content.push_str(";\n");
+        content.push_str(&union_conformity_errors(&one_of_union(
+            variants.iter().map(|v| self.variant_display_name(v)),
+        )));
         content.push_str(&conforms_member("toJson()", "\t"));
 
         content.push_str("\n}\n\n");
@@ -811,6 +920,12 @@ class BEAM{}Model implements BEAMSerde {{
             content.push_str(&tests.join("\n\t\t|| "));
         }
         content.push_str(";\n");
+        content.push_str(&union_conformity_errors(&one_of_union(variants.iter().map(
+            |v| match &v.list_inner_type {
+                Some(_) => "List".to_string(),
+                None => self.expected_name(&v.value_type),
+            },
+        ))));
         content.push_str(&conforms_member("toJson()", "\t"));
 
         content.push_str("\n}\n\n");
@@ -983,6 +1098,25 @@ class BEAM{}Model implements BEAMSerde {{
             ));
         }
         content.push_str("\t\t\tdynamic _ => false,\n\t\t};\n\t}\n");
+        // Errors mirror the tag dispatch: a known tag reports the selected
+        // variant's own (path-precise) errors; an unknown tag is one error at
+        // the discriminator key.
+        let tag_values: Vec<&str> = arms.iter().map(|(value, _)| *value).collect();
+        content.push_str(&format!(
+            "\n\t{} {{\n\t\tif (json is! Map<String, dynamic>) return [BeamConformErr.mismatch(path, 'object', json)];\n\t\tfinal tag = json['{}'];\n\t\treturn switch(tag) {{\n",
+            CONFORMITY_ERRORS_SIG, discrimination.key
+        ));
+        for (discriminator_value, variant_index) in arms.iter() {
+            content.push_str(&format!(
+                "\t\t\t'{}' => deep ? {}.checkConformityErrors(json, path: path, deep: deep) : const [],\n",
+                discriminator_value, variants[*variant_index].referenced_type_name
+            ));
+        }
+        content.push_str(&format!(
+            "\t\t\tdynamic _ => [BeamConformErr.enumMismatch({}, '{}', tag)],\n\t\t}};\n\t}}\n",
+            child_path_expr(discrimination.key),
+            dart_str_escape(&format!("one of {}", tag_values.join("|")))
+        ));
         content.push_str(&conforms_member("toJson()", "\t"));
 
         content.push_str("\n}\n\n");
@@ -1105,6 +1239,15 @@ class BEAM{}Model implements BEAMSerde {{
             "\t\tdynamic _ => {},\n\t}};\n",
             if allows_unspecified { "true" } else { "false" }
         ));
+        let member_values: Vec<&str> = allowed_values_str
+            .iter()
+            .map(|(orig_value, _, _, _)| orig_value.as_ref())
+            .collect();
+        content.push_str(&format!(
+            "\n\t{} =>\n\t\tcheckConform(json, deep: deep) ? const [] : [BeamConformErr.enumMismatch(path, '{}', json)];\n",
+            CONFORMITY_ERRORS_SIG,
+            dart_str_escape(&format!("one of {}", member_values.join("|")))
+        ));
         content.push_str(&conforms_member("toJson()", "\t"));
         content.push_str("}\n");
         EnumCode {
@@ -1180,6 +1323,12 @@ class BEAM{}Model implements BEAMSerde {{
                         (
                             format!("{}<{}>", to_dart_prim(&prim.value), inner_class_name),
                             PropertyType::Primitive(PrimitivePropertyType::List {
+                                inner_expected: match &**inner_iast {
+                                    intermediate::IAST::Primitive(p) => {
+                                        self.expected_name(&to_dart_prim(&p.value))
+                                    }
+                                    _ => self.expected_name(&inner_class_name),
+                                },
                                 inner_type: inner_class_name,
                                 inner_is_primitive: match &**inner_iast {
                                     // enums are not considered primitive in dart because e.g. they need to be parsed with .fromJson
@@ -1337,6 +1486,20 @@ class BEAM{}Model implements BEAMSerde {{
                 .collect();
             product_check_conform
                 .push_str(&format!("    return {};\n", checks.join("\n      && ")));
+        }
+        product_check_conform.push_str("  }\n");
+        product_check_conform.push_str(&format!("\n  {} {{\n", CONFORMITY_ERRORS_SIG));
+        product_check_conform.push_str(
+            "    if (json is! Map<String, dynamic>) return [BeamConformErr.mismatch(path, 'object', json)];\n",
+        );
+        if properties.is_empty() {
+            product_check_conform.push_str("    return const [];\n");
+        } else {
+            product_check_conform.push_str("    final errors = <BeamConformErr>[];\n");
+            for prop in properties.iter() {
+                product_check_conform.push_str(&self.prop_conformity_stmts(prop));
+            }
+            product_check_conform.push_str("    return errors;\n");
         }
         product_check_conform.push_str("  }\n");
 
@@ -1592,6 +1755,7 @@ fn prop_from_json_expr(prop: &Property, src: &str) -> String {
             PrimitivePropertyType::List {
                 inner_type,
                 inner_is_primitive,
+                ..
             } => format!(
                 "{} UnmodifiableListView(({}['{}'] as List).map((e) => {}).toList())",
                 if prop.nullable {
@@ -1668,6 +1832,7 @@ fn prop_conforms_expr(prop: &Property, src: &str) -> String {
         PropertyType::Primitive(PrimitivePropertyType::List {
             inner_type,
             inner_is_primitive,
+            ..
         }) => {
             let elem = if *inner_is_primitive {
                 format!("e is {}", inner_type)
@@ -1696,9 +1861,61 @@ fn prop_conforms_expr(prop: &Property, src: &str) -> String {
 /// otherwise). `indent` prefixes each emitted line.
 fn conforms_member(raw: &str, indent: &str) -> String {
     format!(
-        "\n{i}@override\n{i}bool conforms({{bool deep = true}}) => checkConform({raw}, deep: deep);\n",
+        "\n{i}@override\n{i}bool conforms({{bool deep = true}}) => checkConform({raw}, deep: deep);\n\n{i}@override\n{i}List<BeamConformErr> conformityErrors({{String path = r'$', bool deep = true}}) =>\n{i}\t\tcheckConformityErrors({raw}, path: path, deep: deep);\n",
         i = indent,
         raw = raw
+    )
+}
+
+/// Signature of the static, error-collecting twin of `checkConform`. It can't
+/// share the instance method's `conformityErrors` name: Dart forbids a static
+/// and an instance member with the same name in one class.
+const CONFORMITY_ERRORS_SIG: &str =
+    "static List<BeamConformErr> checkConformityErrors(dynamic json, {String path = r'$', bool deep = true})";
+
+/// Escape `s` for use inside a single-quoted Dart string literal.
+fn dart_str_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('\'', "\\'")
+        .replace('$', "\\$")
+}
+
+/// Dart expression for the JSON path of child `segment` under the runtime
+/// `path` (e.g. `'${path}.amount'`). Identifier-like keys use dot notation,
+/// anything else bracket notation (`$['foo-bar']`).
+fn child_path_expr(key: &str) -> String {
+    let is_ident = key
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    let segment = if is_ident {
+        format!(".{}", key)
+    } else {
+        format!("['{}']", key)
+    };
+    format!("'${{path}}{}'", dart_str_escape(&segment))
+}
+
+/// `one of A | B` over the given display names, deduplicated in order.
+fn one_of_union(names: impl IntoIterator<Item = String>) -> String {
+    let mut seen: Vec<String> = Vec::new();
+    for n in names {
+        if !seen.contains(&n) {
+            seen.push(n);
+        }
+    }
+    format!("one of {}", seen.join(" | "))
+}
+
+/// The union form of `checkConformityErrors`: a union conforms iff some arm
+/// does, so on failure it reports a single error at the union's own path
+/// (not every arm's errors).
+fn union_conformity_errors(expected: &str) -> String {
+    format!(
+        "\n\t{} =>\n\t\tcheckConform(json, deep: deep) ? const [] : [BeamConformErr.mismatch(path, '{}', json)];\n",
+        CONFORMITY_ERRORS_SIG,
+        dart_str_escape(expected)
     )
 }
 
@@ -1739,6 +1956,9 @@ enum PrimitivePropertyType {
     List {
         inner_type: String,
         inner_is_primitive: bool,
+        /// `conformityErrors`' `expected` for a primitive element (e.g.
+        /// `String` for an inline `typedef Foo_items = String;`).
+        inner_expected: String,
     },
     Default,
 }

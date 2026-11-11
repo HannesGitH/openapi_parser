@@ -2041,3 +2041,202 @@ fn discriminated_union_dedupes_values_sharing_a_schema() {
     let poll = file(&lazy, "schemes/Poll.dart");
     assert_eq!(poll.matches("=> !deep || BEAMPendingModel.checkConform").count(), 4, "{poll}");
 }
+
+// ---------------------------------------------------------------------------
+// Path-aware conformity errors (`checkConformityErrors` / `conformityErrors`)
+// ---------------------------------------------------------------------------
+
+const CONFORMITY_SIG: &str =
+    "static List<BeamConformErr> checkConformityErrors(dynamic json, {String path = r'$', bool deep = true})";
+const CONFORMITY_INSTANCE: &str =
+    "List<BeamConformErr> conformityErrors({String path = r'$', bool deep = true})";
+
+const CONFORMITY_SPEC: &str = r##"{
+    "openapi": "3.1.0",
+    "info": { "title": "t", "version": "0" },
+    "components": {
+        "schemas": {
+            "Url": { "type": "string" },
+            "Cat": { "type": "object", "properties": { "kind": { "type": "string" } }, "required": ["kind"] },
+            "Dog": { "type": "object", "properties": { "kind": { "type": "string" } }, "required": ["kind"] },
+            "Pet": { "oneOf": [ { "$ref": "#/components/schemas/Cat" }, { "$ref": "#/components/schemas/Dog" } ] },
+            "TPet": {
+                "oneOf": [ { "$ref": "#/components/schemas/Cat" }, { "$ref": "#/components/schemas/Dog" } ],
+                "discriminator": { "propertyName": "kind", "mapping": {
+                    "cat": "#/components/schemas/Cat", "dog": "#/components/schemas/Dog"
+                } }
+            },
+            "MaybeCat": { "anyOf": [ { "$ref": "#/components/schemas/Cat" }, { "type": "null" } ] },
+            "Item": {
+                "type": "object",
+                "properties": {
+                    "amount": { "type": "number" },
+                    "note": { "type": "string" },
+                    "frequency": { "type": "string", "enum": ["weekly", "monthly"] },
+                    "cat": { "$ref": "#/components/schemas/Cat" },
+                    "primaryAssetUrls": { "type": "array", "items": { "$ref": "#/components/schemas/Url" } },
+                    "tags": { "type": "array", "items": { "type": "string" } },
+                    "cats": { "type": "array", "items": { "$ref": "#/components/schemas/Cat" } },
+                    "foo-bar": { "type": "integer" }
+                },
+                "required": ["amount", "cat", "primaryAssetUrls", "cats", "foo-bar"]
+            }
+        }
+    },
+    "paths": {}
+}"##;
+
+#[test]
+fn serde_declares_beam_conform_err_and_instance_conformity_errors() {
+    let files = generate(CONFORMITY_SPEC);
+    let serde = file(&files, "utils/serde.dart");
+    assert_contains(serde, "final class BeamConformErr {", "error type");
+    assert_contains(
+        serde,
+        "String toString() =>\n      'BeamConformErr: $identifierPath expected $expected, received $received';",
+        "toString format",
+    );
+    assert_contains(
+        serde,
+        "List<BeamConformErr> conformityErrors({String path = r'$', bool deep = true});",
+        "BEAMSerde declares conformityErrors",
+    );
+    assert_contains(
+        serde,
+        "}) => const [];",
+        "UnknownBEAMObject never reports errors",
+    );
+    assert_contains(
+        serde,
+        "}) => checkConformityErrors(rawValue, path: path, deep: deep);",
+        "UnknownBEAMObject instance delegates with its raw value",
+    );
+}
+
+#[test]
+fn every_checkconform_has_a_conformity_errors_twin() {
+    for (mode, files) in [("eager", generate(CONFORMITY_SPEC)), ("lazy", generate_lazy(CONFORMITY_SPEC))] {
+        for path in [
+            "schemes/Cat.dart",
+            "schemes/Item.dart",
+            "schemes/Pet.dart",
+            "schemes/TPet.dart",
+            "schemes/MaybeCat.dart",
+        ] {
+            let content = file(&files, path);
+            assert_eq!(
+                content.matches("static bool checkConform(").count(),
+                content.matches(CONFORMITY_SIG).count(),
+                "{mode} {path}: one checkConformityErrors per checkConform\n{content}"
+            );
+            assert_eq!(
+                content.matches("bool conforms({bool deep = true})").count(),
+                content.matches(CONFORMITY_INSTANCE).count(),
+                "{mode} {path}: one conformityErrors per conforms"
+            );
+        }
+    }
+    assert_contains(
+        file(&generate_lazy(CONFORMITY_SPEC), "schemes/Cat.dart"),
+        "checkConformityErrors(_rawValue, path: path, deep: deep);",
+        "lazy instance method uses the backing map",
+    );
+    assert_contains(
+        file(&generate(CONFORMITY_SPEC), "schemes/Cat.dart"),
+        "checkConformityErrors(toJson(), path: path, deep: deep);",
+        "eager instance method uses toJson()",
+    );
+}
+
+#[test]
+fn product_conformity_errors_extend_paths_and_mirror_checkconform() {
+    let files = generate_lazy(CONFORMITY_SPEC);
+    let item = file(&files, "schemes/Item.dart");
+    assert_contains(
+        item,
+        "if (json is! Map<String, dynamic>) return [BeamConformErr.mismatch(path, 'object', json)];",
+        "non-map is one error at path",
+    );
+    assert_contains(
+        item,
+        "if (v is! num) errors.add(BeamConformErr.mismatch('${path}.amount', 'num', v));",
+        "required primitive",
+    );
+    assert_contains(
+        item,
+        "if (v != null) {\n    if (v is! String) errors.add(BeamConformErr.mismatch('${path}.note', 'String', v));",
+        "nullable primitive tolerates null",
+    );
+    assert_contains(
+        item,
+        "if (deep) errors.addAll(BEAMCatModel.checkConformityErrors(v, path: '${path}.cat', deep: deep));",
+        "nested object recurses only when deep",
+    );
+    assert_contains(
+        item,
+        "errors.add(BeamConformErr.mismatch('${path}.primaryAssetUrls', 'List', v));",
+        "non-list is one error",
+    );
+    assert_contains(
+        item,
+        "if (e is! BEAMUrlModel) errors.add(BeamConformErr.mismatch('${path}.primaryAssetUrls[$i]', 'String', e));",
+        "list of primitive typedefs checks each element against the resolved primitive",
+    );
+    assert_contains(
+        item,
+        "if (e is! BEAMItem_tagsModel) errors.add(BeamConformErr.mismatch('${path}.tags[$i]', 'String', e));",
+        "inline primitive list element resolves to its primitive",
+    );
+    assert_contains(
+        item,
+        "errors.addAll(BEAMCatModel.checkConformityErrors(e, path: '${path}.cats[$i]', deep: deep));",
+        "object list elements recurse with index path",
+    );
+    assert_contains(
+        item,
+        "BeamConformErr.mismatch('${path}[\\'foo-bar\\']', 'int', v)",
+        "non-identifier keys use bracket notation",
+    );
+}
+
+#[test]
+fn enum_and_union_conformity_errors() {
+    let files = generate(CONFORMITY_SPEC);
+    let item = file(&files, "schemes/Item.dart");
+    assert_contains(
+        item,
+        "[BeamConformErr.enumMismatch(path, 'one of weekly|monthly', json)]",
+        "enum reports its members",
+    );
+    assert_contains(
+        file(&files, "schemes/Pet.dart"),
+        "checkConform(json, deep: deep) ? const [] : [BeamConformErr.mismatch(path, 'one of Cat | Dog', json)];",
+        "union: single error at its own path",
+    );
+    let tpet = file(&files, "schemes/TPet.dart");
+    assert_contains(
+        tpet,
+        "'cat' => deep ? BEAMCatModel.checkConformityErrors(json, path: path, deep: deep) : const [],",
+        "discriminated union recurses into the tagged variant",
+    );
+    assert_contains(
+        tpet,
+        "dynamic _ => [BeamConformErr.enumMismatch('${path}.kind', 'one of cat|dog', tag)],",
+        "unknown tag is one error at the discriminator key",
+    );
+    assert_contains(
+        file(&files, "schemes/MaybeCat.dart"),
+        "json == null ? const [] : BEAMMaybeCatNonNullModel.checkConformityErrors(json, path: path, deep: deep);",
+        "nullable wrapper",
+    );
+    let union = file(
+        &generate(HOOKS_SPEC),
+        "endpoints/routes/_usersMethods/get.resp.schema.dart",
+    )
+    .to_string();
+    assert_contains(
+        &union,
+        "[BeamConformErr.mismatch(path, 'one of List | String | Error', json)]",
+        "status-code response union",
+    );
+}

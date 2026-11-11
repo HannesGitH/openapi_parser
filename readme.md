@@ -58,6 +58,25 @@ the value's own raw JSON (the backing map for lazy models, `toJson()`
 otherwise). Under `--lazy` this tells you whether a model you received
 actually matches the spec without touching every getter.
 
+To find out *what* doesn't match, every such type also has a static
+`checkConformityErrors(json, {path = r'$', deep = true})` and an instance
+`conformityErrors({path, deep})`. They walk the same structure as
+`checkConform` but collect every mismatch instead of stopping at the first
+(`checkConform` itself stays short-circuiting, since union discrimination
+relies on it):
+
+```
+BeamConformErr: $.items[3].amount expected num, received String
+BeamConformErr: $.frequency expected one of weekly|monthly, received "monthlyy"
+BeamConformErr: $.pet expected one of Cat | Dog, received object
+```
+
+The result is empty exactly when `checkConform` is true. `received` holds only
+the JSON kind of the value, never the value itself, so errors are safe to log.
+The one exception is an enum (or discriminator) string, which is shown in
+quotes. A plain union reports one error at its own path; a discriminated union
+reports the tagged variant's own errors.
+
 ### debug hooks
 
 A `JsonRequestHandler` may additionally mix in `BeamHandlerHooks` (opt-in, like

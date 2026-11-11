@@ -11,6 +11,67 @@ abstract interface class BEAMSerde {
   /// `checkConform`; [deep] also validates nested objects, enums, unions and
   /// list elements.
   bool conforms({bool deep = true});
+
+  /// Like [conforms], but collects every mismatch (with its JSON path,
+  /// starting at [path]) instead of stopping at the first one. Empty iff
+  /// [conforms] is true. Delegates to the type's static
+  /// `checkConformityErrors`.
+  List<BeamConformErr> conformityErrors({String path = r'$', bool deep = true});
+}
+
+/// One structural mismatch found by `conformityErrors`.
+///
+/// Safe to log: [received] never contains the payload value, only its JSON
+/// kind — except for an enum (or discriminator) mismatch on a string, which
+/// shows the offending string in quotes.
+final class BeamConformErr {
+  const BeamConformErr({
+    required this.identifierPath,
+    required this.expected,
+    required this.received,
+  });
+
+  /// JSON path from the payload root, e.g. `$.data.items[3].amount`.
+  final String identifierPath;
+  final String expected;
+  final String received;
+
+  /// The JSON kind of [value] (never the value itself): `String`, `int`,
+  /// `double`, `bool`, `null`, `object` for maps, `List` for lists.
+  static String kindOf(dynamic value) => switch (value) {
+    null => 'null',
+    String() => 'String',
+    int() => 'int',
+    double() => 'double',
+    bool() => 'bool',
+    Map() => 'object',
+    List() => 'List',
+    _ => 'unknown',
+  };
+
+  /// A mismatch at [path] whose `received` is the JSON kind of [value].
+  factory BeamConformErr.mismatch(String path, String expected, dynamic value) =>
+      BeamConformErr(
+        identifierPath: path,
+        expected: expected,
+        received: kindOf(value),
+      );
+
+  /// An enum mismatch: a string value is shown quoted (enum values come from
+  /// the spec), anything else only by its JSON kind.
+  factory BeamConformErr.enumMismatch(
+    String path,
+    String expected,
+    dynamic value,
+  ) => BeamConformErr(
+    identifierPath: path,
+    expected: expected,
+    received: value is String ? '"$value"' : kindOf(value),
+  );
+
+  @override
+  String toString() =>
+      'BeamConformErr: $identifierPath expected $expected, received $received';
 }
 
 extension BEAMSerdeExtension<T extends BEAMSerde> on T {
@@ -86,6 +147,12 @@ class UnknownBEAMObject implements BEAMSerde {
   @override
   bool conforms({bool deep = true}) => checkConform(rawValue, deep: deep);
 
+  @override
+  List<BeamConformErr> conformityErrors({
+    String path = r'$',
+    bool deep = true,
+  }) => checkConformityErrors(rawValue, path: path, deep: deep);
+
   factory UnknownBEAMObject.fromJson(dynamic json) =>
       UnknownBEAMObject(rawValue: json);
 
@@ -93,4 +160,10 @@ class UnknownBEAMObject implements BEAMSerde {
   /// lazy union discriminator can call `checkConform` uniformly on every
   /// `BEAMSerde` value type.
   static bool checkConform(dynamic json, {bool deep = true}) => true;
+
+  static List<BeamConformErr> checkConformityErrors(
+    dynamic json, {
+    String path = r'$',
+    bool deep = true,
+  }) => const [];
 }
