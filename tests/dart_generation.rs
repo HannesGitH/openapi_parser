@@ -574,7 +574,7 @@ fn endpoint_request_body_list_of_ref_to_object_serializes_each_element() {
 
     assert_contains(
         route,
-        "body?.map((e) => e.toJson()).toList()",
+        "body: hookedBody?.map((e) => e.toJson()).toList()",
         "List<Object> request body must serialize element-by-element",
     );
     // It must NOT call `.toJson()` on the list itself (Dart `List` has no
@@ -582,12 +582,12 @@ fn endpoint_request_body_list_of_ref_to_object_serializes_each_element() {
     // straight into the network layer).
     assert_not_contains(
         route,
-        "body: body?.toJson()",
+        "body: hookedBody?.toJson()",
         "List request body must not call .toJson() on the list",
     );
     assert_not_contains(
         route,
-        "body: body,",
+        "body: hookedBody,",
         "List<Object> request body must not be passed raw",
     );
 }
@@ -625,15 +625,15 @@ fn endpoint_request_body_list_of_ref_to_primitive_is_sent_raw() {
     let files = generate(spec);
     let route = file(&files, "endpoints/routes/_ids.dart");
 
-    assert_contains(route, "body: body,", "primitive list body sent raw");
+    assert_contains(route, "body: hookedBody,", "primitive list body sent raw");
     assert_not_contains(
         route,
-        "body?.map((e) => e.toJson()).toList()",
+        "body: hookedBody?.map((e) => e.toJson()).toList()",
         "primitive list body must not call .toJson() on its elements",
     );
     assert_not_contains(
         route,
-        "body?.toJson()",
+        "hookedBody?.toJson()",
         "primitive list body must not call .toJson() on the list",
     );
 }
@@ -670,7 +670,7 @@ fn endpoint_request_body_ref_to_primitive_does_not_call_tojson() {
     let route = file(&files, "endpoints/routes/_id.dart");
     assert_not_contains(
         route,
-        "body?.toJson()",
+        "hookedBody?.toJson()",
         "primitive-typedef request body must be sent raw, not via .toJson()",
     );
 }
@@ -1413,10 +1413,10 @@ fn endpoint_response_ref_to_never_calls_fromjson() {
         "BEAMNothingModel.fromJson(json)",
         "$ref-to-never response must decode via .fromJson",
     );
-    // The raw-primitive form would be `.then((json) => json)`.
+    // The raw-primitive form would be `final ... decoded = json;`.
     assert_not_contains(
         route,
-        "(json) => json)",
+        "decoded = json;",
         "$ref-to-never response must not be returned as raw JSON",
     );
 }
@@ -1454,7 +1454,7 @@ fn endpoint_request_body_ref_to_never_calls_tojson() {
 
     assert_contains(
         route,
-        "body: body?.toJson()",
+        "body: hookedBody?.toJson()",
         "$ref-to-never request body must serialize via .toJson",
     );
 }
@@ -1672,7 +1672,7 @@ fn lazy_sum_union_discriminates_via_checkconform() {
 }
 
 #[test]
-fn eager_sum_union_keeps_trycatch_and_no_checkconform() {
+fn eager_sum_union_keeps_trycatch_discrimination() {
     let files = generate(PET_SPEC);
     let pet = file(&files, "schemes/Pet.dart");
     assert_contains(
@@ -1680,7 +1680,248 @@ fn eager_sum_union_keeps_trycatch_and_no_checkconform() {
         "final errors = <String,Object>",
         "eager keeps try/catch fromJson",
     );
-    assert_not_contains(pet, "checkConform", "eager mode must not emit checkConform");
+    // `checkConform` exists in eager mode too (backing `conforms`), but the
+    // eager discriminator must not use it.
+    assert_not_contains(
+        pet,
+        "if (BEAMCatModel.checkConform(json)) return",
+        "eager fromJson must not discriminate via checkConform",
+    );
+    assert_contains(
+        pet,
+        "static bool checkConform(dynamic json, {bool deep = true}) =>",
+        "eager union still exposes checkConform for `conforms`",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// `BEAMSerde.conforms` + `BeamHandlerHooks`
+// ---------------------------------------------------------------------------
+
+const CONFORMS_LINE_TOJSON: &str =
+    "bool conforms({bool deep = true}) => checkConform(toJson(), deep: deep);";
+
+#[test]
+fn serde_interface_declares_conforms_and_unknown_object_implements_it() {
+    let files = generate(PET_SPEC);
+    let serde = file(&files, "utils/serde.dart");
+    assert_contains(
+        serde,
+        "bool conforms({bool deep = true});",
+        "BEAMSerde declares conforms",
+    );
+    assert_contains(
+        serde,
+        "bool conforms({bool deep = true}) => checkConform(rawValue, deep: deep);",
+        "UnknownBEAMObject implements conforms via its raw value",
+    );
+    assert_contains(
+        serde,
+        "static bool checkConform(dynamic json, {bool deep = true}) => true;",
+        "UnknownBEAMObject keeps its static checkConform",
+    );
+}
+
+#[test]
+fn every_scheme_kind_implements_conforms_in_both_modes() {
+    let spec = r##"{
+        "openapi": "3.1.0",
+        "info": { "title": "t", "version": "0" },
+        "components": {
+            "schemas": {
+                "Cat": { "type": "object", "properties": { "kind": { "type": "string" } }, "required": ["kind"] },
+                "Dog": { "type": "object", "properties": { "kind": { "type": "string" } }, "required": ["kind"] },
+                "Role": { "type": "string", "enum": ["admin", "user"] },
+                "Pet": { "oneOf": [ { "$ref": "#/components/schemas/Cat" }, { "$ref": "#/components/schemas/Dog" } ] },
+                "TPet": {
+                    "oneOf": [ { "$ref": "#/components/schemas/Cat" }, { "$ref": "#/components/schemas/Dog" } ],
+                    "discriminator": { "propertyName": "kind", "mapping": {
+                        "cat": "#/components/schemas/Cat", "dog": "#/components/schemas/Dog"
+                    } }
+                },
+                "MaybeCat": { "anyOf": [ { "$ref": "#/components/schemas/Cat" }, { "type": "null" } ] }
+            }
+        },
+        "paths": {}
+    }"##;
+    for (mode, files) in [("eager", generate(spec)), ("lazy", generate_lazy(spec))] {
+        // Every kind must carry the static check `conforms` delegates to.
+        for path in [
+            "schemes/Cat.dart",
+            "schemes/Role.dart",
+            "schemes/Pet.dart",
+            "schemes/TPet.dart",
+            "schemes/MaybeCat.dart",
+        ] {
+            let content = file(&files, path);
+            assert_contains(
+                content,
+                "static bool checkConform(dynamic json, {bool deep = true})",
+                &format!("{mode} {path} exposes checkConform"),
+            );
+            assert_contains(content, "@override", &format!("{mode} {path}"));
+        }
+        for path in [
+            "schemes/Role.dart",
+            "schemes/Pet.dart",
+            "schemes/TPet.dart",
+            "schemes/MaybeCat.dart",
+        ] {
+            assert_contains(
+                file(&files, path),
+                CONFORMS_LINE_TOJSON,
+                &format!("{mode} {path} conforms checks its toJson() value"),
+            );
+        }
+        // The nullable wrapper gets one too (it's a separate BEAMSerde class).
+        assert_eq!(
+            file(&files, "schemes/MaybeCat.dart")
+                .matches(CONFORMS_LINE_TOJSON)
+                .count(),
+            2,
+            "{mode}: inner union + nullable wrapper both implement conforms"
+        );
+    }
+    // Models: lazy checks the backing map, eager its toJson().
+    assert_contains(
+        file(&generate_lazy(spec), "schemes/Cat.dart"),
+        "bool conforms({bool deep = true}) => checkConform(_rawValue, deep: deep);",
+        "lazy model conforms checks _rawValue",
+    );
+    assert_contains(
+        file(&generate(spec), "schemes/Cat.dart"),
+        CONFORMS_LINE_TOJSON,
+        "eager model conforms checks toJson()",
+    );
+}
+
+const HOOKS_SPEC: &str = r##"{
+    "openapi": "3.1.0",
+    "info": { "title": "t", "version": "0" },
+    "components": {
+        "schemas": {
+            "User": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] },
+            "Error": { "type": "object", "properties": { "message": { "type": "string" } }, "required": ["message"] }
+        }
+    },
+    "paths": {
+        "/users": {
+            "get": { "responses": {
+                "200": { "description": "", "content": { "application/json": { "schema": {
+                    "type": "array", "items": { "$ref": "#/components/schemas/User" } } } } },
+                "201": { "description": "", "content": { "application/json": { "schema": { "type": "string" } } } },
+                "404": { "description": "", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+            } },
+            "post": {
+                "requestBody": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/User" } } } },
+                "responses": { "200": { "description": "", "content": { "application/json": { "schema": {
+                    "type": "array", "items": { "$ref": "#/components/schemas/User" } } } } } }
+            }
+        }
+    }
+}"##;
+
+#[test]
+fn status_code_response_union_implements_conforms() {
+    let files = generate(HOOKS_SPEC);
+    let union = file(&files, "endpoints/routes/_usersMethods/get.resp.schema.dart");
+    assert_contains(
+        union,
+        "static bool checkConform(dynamic json, {bool deep = true}) =>",
+        "response union exposes checkConform",
+    );
+    assert_contains(
+        union,
+        "(json is List && (!deep || json.every((e) => BEAMUserModel.checkConform(e, deep: deep))))",
+        "List<Model> arm",
+    );
+    assert_contains(union, "|| json is String", "primitive arm");
+    assert_contains(
+        union,
+        "|| BEAMErrorModel.checkConform(json, deep: deep);",
+        "model arm",
+    );
+    assert_contains(union, CONFORMS_LINE_TOJSON, "response union conforms");
+}
+
+#[test]
+fn hooks_mixin_is_optional_and_json_request_handler_is_unchanged() {
+    let files = generate(HOOKS_SPEC);
+    let endpoints = file(&files, "endpoints/endpoints.dart");
+    assert_contains(
+        endpoints,
+        "mixin class BeamHandlerHooks {",
+        "hooks are a mixin class",
+    );
+    assert_contains(
+        endpoints,
+        "T beforeRequest<T>({\n    required BEAMPathEnum path,\n    required BEAMRequestMethod method,\n    required T body,\n  }) => body;",
+        "beforeRequest is synchronous pass-through",
+    );
+    assert_contains(
+        endpoints,
+        "T afterDecode<T>({\n    required BEAMPathEnum path,\n    required BEAMRequestMethod method,\n    required T value,\n  }) => value;",
+        "afterDecode is synchronous pass-through",
+    );
+    // JsonRequestHandler must not gain members (existing implementers/fakes).
+    let start = endpoints
+        .find("abstract interface class JsonRequestHandler {")
+        .expect("JsonRequestHandler present");
+    let handler_decl = &endpoints[start..start + endpoints[start..].find("\n}\n").unwrap()];
+    assert_not_contains(handler_decl, "beforeRequest", "JsonRequestHandler unchanged");
+    assert_not_contains(handler_decl, "afterDecode", "JsonRequestHandler unchanged");
+    // ...and the generic request plumbing doesn't call the hooks.
+    assert_not_contains(endpoints, ".afterDecode", "BEAMPath/BEAMCachedResponse must not call afterDecode");
+    assert_not_contains(endpoints, ".beforeRequest", "BEAMPath must not call beforeRequest");
+}
+
+#[test]
+fn routes_pass_body_and_decoded_value_through_hooks() {
+    for files in [generate(HOOKS_SPEC), generate_lazy(HOOKS_SPEC)] {
+        let route = file(&files, "endpoints/routes/_users.dart");
+
+        // Request: typed body through beforeRequest, then serialized.
+        assert_contains(
+            route,
+            "final hookedBody = switch (handler) {\n\t\t\tfinal BeamHandlerHooks hooks => hooks.beforeRequest(path: path, method: BEAMRequestMethod.post, body: body),\n\t\t\t_ => body,\n\t\t};",
+            "body goes through beforeRequest",
+        );
+        assert_contains(route, "body: hookedBody?.toJson()", "hooked body is serialized");
+        assert_eq!(
+            route.matches("beforeRequest").count(),
+            1,
+            "only the method with a body calls beforeRequest"
+        );
+
+        // Response (List<Model>): typed decode, explicit T, once per method.
+        assert_contains(
+            route,
+            "final List<BEAMUserModel> decoded = (json as List).map((e) => BEAMUserModel.fromJson(e)).toList();",
+            "list response decoded into a typed local",
+        );
+        assert_contains(
+            route,
+            "final BeamHandlerHooks hooks => hooks.afterDecode<List<BEAMUserModel>>(path: path, method: BEAMRequestMethod.post, value: decoded),\n\t\t\t\t_ => decoded,",
+            "list response goes through afterDecode with T = declared type",
+        );
+
+        // Multi-status: the fromCode ?? fromJson value is what gets hooked.
+        assert_contains(
+            route,
+            "final BEAM_usersMethods_getResponseModel decoded = statusCode != null ? (BEAM_usersMethods_getResponseModel.fromCode(statusCode, json) ?? BEAM_usersMethods_getResponseModel.fromJson(json)) : BEAM_usersMethods_getResponseModel.fromJson(json);",
+            "multi-status decode bound to a typed local",
+        );
+        assert_contains(
+            route,
+            "hooks.afterDecode<BEAM_usersMethods_getResponseModel>(path: path, method: BEAMRequestMethod.get, value: decoded)",
+            "multi-status value goes through afterDecode",
+        );
+        assert_eq!(
+            route.matches("afterDecode").count(),
+            2,
+            "exactly one afterDecode per generated method"
+        );
+    }
 }
 
 #[test]
@@ -1725,7 +1966,7 @@ fn lazy_endpoint_still_serializes_and_parses_via_lazy_models() {
     let route = file(&files, "endpoints/routes/_widgets.dart");
     assert_contains(
         route,
-        "body: body?.toJson()",
+        "body: hookedBody?.toJson()",
         "request body serialized via toJson",
     );
     assert_contains(

@@ -5,6 +5,12 @@ abstract interface class BEAMSerde {
   /// either a Map<String, dynamic> or a List<dynamic> or a String or a int or a double or a bool or null
   /// in this case probably only Map<String, dynamic> and String
   dynamic toJson();
+
+  /// Whether this value's raw JSON (what [toJson] returns) structurally
+  /// conforms to its declared type. Delegates to the type's static
+  /// `checkConform`; [deep] also validates nested objects, enums, unions and
+  /// list elements.
+  bool conforms({bool deep = true});
 }
 
 extension BEAMSerdeExtension<T extends BEAMSerde> on T {
@@ -76,6 +82,9 @@ class UnknownBEAMObject implements BEAMSerde {
 
   @override
   dynamic toJson() => rawValue;
+
+  @override
+  bool conforms({bool deep = true}) => checkConform(rawValue, deep: deep);
 
   factory UnknownBEAMObject.fromJson(dynamic json) =>
       UnknownBEAMObject(rawValue: json);

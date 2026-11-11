@@ -408,6 +408,16 @@ impl<'a> EndpointAdder<'a> {
                     "\n\t\t{}",
                     params.as_json_body.replace("\n", "\n\t\t")
                 ));
+                // Methods with a body first pass the typed body through the
+                // optional `BeamHandlerHooks.beforeRequest` hook (only when the
+                // handler mixes it in), then serialize the hooked value. `T`
+                // is inferred from `body`, so `hookedBody` keeps its type.
+                if body_class.decl.is_some() {
+                    s.push_str(&format!(
+                        "final hookedBody = switch (handler) {{\n\t\t\tfinal BeamHandlerHooks hooks => hooks.beforeRequest(path: path, method: BEAMRequestMethod.{method}, body: body),\n\t\t\t_ => body,\n\t\t}};\n\t\t",
+                        method = method_str,
+                    ));
+                }
                 let body_emission: String = match (
                     &body_class.decl,
                     body_class.is_primitive,
@@ -417,20 +427,34 @@ impl<'a> EndpointAdder<'a> {
                     (None, _, _) => "null".to_string(),
                     // Primitive body (single primitive OR `List<Primitive>`):
                     // send raw, no serialization step needed.
-                    (Some(_), true, _) => "body".to_string(),
+                    (Some(_), true, _) => "hookedBody".to_string(),
                     // Non-primitive list body (`List<Object>` /
                     // `List<Enum>`): Dart's built-in `List` has no
                     // `.toJson()`, so we must serialize element-by-element.
                     (Some(_), false, Some(_)) => {
-                        "body?.map((e) => e.toJson()).toList()".to_string()
+                        "hookedBody?.map((e) => e.toJson()).toList()".to_string()
                     }
                     // Single non-primitive body: call .toJson() directly.
-                    (Some(_), false, None) => "body?.toJson()".to_string(),
+                    (Some(_), false, None) => "hookedBody?.toJson()".to_string(),
                 };
                 let expected_response_type = match response_class.is_binary {
                     true => "BEAMExpectedResponseType.binary",
                     false => "BEAMExpectedResponseType.json",
                 };
+                let t = &response_class.type_str;
+                // The fully decoded value goes through the optional
+                // `BeamHandlerHooks.afterDecode` hook exactly once per decode
+                // (cached and upstream leg), here in the route — not in
+                // `BEAMPath.handle` / `BEAMCachedResponse.then`, so values from
+                // app-level `.then` chains never reach it. `decoded` is typed
+                // and `T` is passed explicitly: inside `.then` the return
+                // context is `FutureOr<T>`, which inference would otherwise
+                // pick for `T`.
+                let hooked_return = format!(
+                    "\t\t\treturn switch (handler) {{\n\t\t\t\tfinal BeamHandlerHooks hooks => hooks.afterDecode<{t}>(path: path, method: BEAMRequestMethod.{method}, value: decoded),\n\t\t\t\t_ => decoded,\n\t\t\t}};\n",
+                    t = t,
+                    method = method_str,
+                );
                 if response_class.is_status_code_union {
                     // Multi-status union: thread the (optional) HTTP status
                     // code through the handler via a `BeamStatusCodeRef`. When
@@ -438,21 +462,30 @@ impl<'a> EndpointAdder<'a> {
                     // decode the exact variant via `fromCode`; otherwise the
                     // ref stays null and we fall back to the (discouraged)
                     // `fromJson`.
-                    let t = &response_class.type_str;
                     s.push_str(&format!(
-                        "final statusCodeRef = BeamStatusCodeRef();\n\t\treturn handleCached(method: BEAMRequestMethod.{method}, params: paramsJson, body: {body}, expectedResponseType: {expected}, statusCodeRef: statusCodeRef).then((json) {{\n\t\t\tfinal statusCode = statusCodeRef.statusCode;\n\t\t\treturn statusCode != null ? ({t}.fromCode(statusCode, json) ?? {t}.fromJson(json)) : {t}.fromJson(json);\n\t\t}});\n",
+                        "final statusCodeRef = BeamStatusCodeRef();\n\t\treturn handleCached(method: BEAMRequestMethod.{method}, params: paramsJson, body: {body}, expectedResponseType: {expected}, statusCodeRef: statusCodeRef).then((json) {{\n\t\t\tfinal statusCode = statusCodeRef.statusCode;\n\t\t\tfinal {t} decoded = statusCode != null ? ({t}.fromCode(statusCode, json) ?? {t}.fromJson(json)) : {t}.fromJson(json);\n{hooked}\t\t}});\n",
                         method = method_str,
                         body = body_emission,
                         expected = expected_response_type,
                         t = t,
+                        hooked = hooked_return,
                     ));
                 } else {
-                    cpf!(s, "return handleCached(method: BEAMRequestMethod.{}, params: paramsJson, body: {}, expectedResponseType: {}).then((json) => {});", method_str, body_emission, expected_response_type, match (response_class.is_primitive, &response_class.list_inner_type) {
+                    let decode_expr = match (response_class.is_primitive, &response_class.list_inner_type) {
                         (true, None) => "json".to_string(),
                         (true, Some(_)) => format!("json"),
                         (false, Some(inner_type)) => format!("(json as List).map((e) => {}.fromJson(e)).toList()", inner_type),
-                        (false, None) => format!("{}.fromJson(json)", response_class.type_str),
-                    });
+                        (false, None) => format!("{}.fromJson(json)", t),
+                    };
+                    s.push_str(&format!(
+                        "return handleCached(method: BEAMRequestMethod.{method}, params: paramsJson, body: {body}, expectedResponseType: {expected}).then((json) {{\n\t\t\tfinal {t} decoded = {decode};\n{hooked}\t\t}});\n",
+                        method = method_str,
+                        body = body_emission,
+                        expected = expected_response_type,
+                        t = t,
+                        decode = decode_expr,
+                        hooked = hooked_return,
+                    ));
                 }
                 s
             };

@@ -48,3 +48,33 @@ catching parse failures; it validates deeply by default.
 
 Note: lazy output uses null-aware collection elements and therefore requires a
 Dart SDK that supports them (>= 3.8).
+
+### conformity checks
+
+Every generated `BEAMSerde` type (models, enums, unions, multi-status response
+unions) has a static `checkConform(json, {deep})`, in both eager and lazy
+mode, plus an instance `bool conforms({bool deep = true})` that runs it against
+the value's own raw JSON (the backing map for lazy models, `toJson()`
+otherwise). Under `--lazy` this tells you whether a model you received
+actually matches the spec without touching every getter.
+
+### debug hooks
+
+A `JsonRequestHandler` may additionally mix in `BeamHandlerHooks` (opt-in, like
+`BeamStatusCodeAwareHandler`; plain handlers keep working unchanged):
+
+```dart
+class MyHandler with BeamHandlerHooks implements JsonRequestHandler {
+  @override
+  T afterDecode<T>({required BEAMPathEnum path, required BEAMRequestMethod method, required T value}) {
+    if (value is BEAMSerde && !value.conforms()) log('$method $path: non-conforming response');
+    return value;
+  }
+  // beforeRequest<T>(...) sees the typed request body before `toJson()`.
+  ...
+}
+```
+
+Generated routes call `beforeRequest` once per request that has a body and
+`afterDecode` once per decoded value (cached and upstream). Both hooks are
+synchronous, and values produced by your own `.then` chains never reach them.

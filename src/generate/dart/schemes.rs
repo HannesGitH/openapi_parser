@@ -82,14 +82,11 @@ impl<'a> SchemeAdder<'a> {
             if scheme.is_inherently_nullable {
                 // The nullable wrapper conforms to null or to whatever its
                 // non-null inner type conforms to (lazy union discrimination).
-                let nullable_check_conform = if self.lazy {
-                    format!(
-                        "\n    static bool checkConform(dynamic json, {{bool deep = true}}) =>\n        json == null || BEAM{}NonNullModel.checkConform(json, deep: deep);\n",
-                        sanitized_scheme_name
-                    )
-                } else {
-                    String::new()
-                };
+                let nullable_check_conform = format!(
+                    "\n    static bool checkConform(dynamic json, {{bool deep = true}}) =>\n        json == null || BEAM{}NonNullModel.checkConform(json, deep: deep);\n{}",
+                    sanitized_scheme_name,
+                    conforms_member("toJson()", "    ")
+                );
                 // lol irgendwann sollte man mal auf ne templating engine umsteigen
                 cpf!(
                     parsed.content,
@@ -571,23 +568,23 @@ class BEAM{}Model implements BEAMSerde {{
             .collect();
         content.push_str(&Self::union_members(&class_name, &member_variants));
 
-        if self.lazy {
-            // Union conformance = any variant conforms; mirrors the lazy
-            // discriminator so the two agree.
-            content.push_str(
-                "\n\n\tstatic bool checkConform(dynamic json, {bool deep = true}) =>\n\t\t",
-            );
-            if variants.is_empty() {
-                content.push_str("false");
-            } else {
-                let tests: Vec<String> = variants
-                    .iter()
-                    .map(|v| self.variant_conform_test(v, ", deep: deep"))
-                    .collect();
-                content.push_str(&tests.join("\n\t\t|| "));
-            }
-            content.push_str(";");
+        // Union conformance = any variant conforms; mirrors the lazy
+        // discriminator so the two agree. Emitted in every mode so the
+        // `conforms` instance check is available on eager unions too.
+        content.push_str(
+            "\n\n\tstatic bool checkConform(dynamic json, {bool deep = true}) =>\n\t\t",
+        );
+        if variants.is_empty() {
+            content.push_str("false");
+        } else {
+            let tests: Vec<String> = variants
+                .iter()
+                .map(|v| self.variant_conform_test(v, ", deep: deep"))
+                .collect();
+            content.push_str(&tests.join("\n\t\t|| "));
         }
+        content.push_str(";\n");
+        content.push_str(&conforms_member("toJson()", "\t"));
 
         content.push_str("\n}\n\n");
 
@@ -787,6 +784,35 @@ class BEAM{}Model implements BEAMSerde {{
             .collect();
         content.push_str(&Self::union_members(&class_name, &member_variants));
 
+        // Conformance = any arm's value type conforms (status codes are not
+        // part of the JSON, so this can't tell arms apart — it only answers
+        // "is this a valid response body for this endpoint").
+        content.push_str(
+            "\n\n\tstatic bool checkConform(dynamic json, {bool deep = true}) =>\n\t\t",
+        );
+        if variants.is_empty() {
+            content.push_str("false");
+        } else {
+            let tests: Vec<String> = variants
+                .iter()
+                .map(|v| match (&v.list_inner_type, v.is_primitive) {
+                    (Some(inner), true) => format!(
+                        "(json is List && (!deep || json.every((e) => e is {})))",
+                        inner
+                    ),
+                    (Some(inner), false) => format!(
+                        "(json is List && (!deep || json.every((e) => {}.checkConform(e, deep: deep))))",
+                        inner
+                    ),
+                    (None, true) => format!("json is {}", v.value_type),
+                    (None, false) => format!("{}.checkConform(json, deep: deep)", v.value_type),
+                })
+                .collect();
+            content.push_str(&tests.join("\n\t\t|| "));
+        }
+        content.push_str(";\n");
+        content.push_str(&conforms_member("toJson()", "\t"));
+
         content.push_str("\n}\n\n");
 
         for v in variants {
@@ -943,23 +969,21 @@ class BEAM{}Model implements BEAMSerde {{
             .collect();
         content.push_str(&Self::union_members(&class_name, &member_variants));
 
-        if self.lazy {
-            // Conformance = valid discriminator whose referenced type conforms.
-            content
-                .push_str("\n\n\tstatic bool checkConform(dynamic json, {bool deep = true}) {\n");
-            content.push_str("\t\tif (json is! Map<String, dynamic>) return false;\n");
+        // Conformance = valid discriminator whose referenced type conforms.
+        content.push_str("\n\n\tstatic bool checkConform(dynamic json, {bool deep = true}) {\n");
+        content.push_str("\t\tif (json is! Map<String, dynamic>) return false;\n");
+        content.push_str(&format!(
+            "\t\treturn switch(json['{}']) {{\n",
+            discrimination.key
+        ));
+        for (discriminator_value, variant_index) in arms.iter() {
             content.push_str(&format!(
-                "\t\treturn switch(json['{}']) {{\n",
-                discrimination.key
+                "\t\t\t'{}' => !deep || {}.checkConform(json, deep: deep),\n",
+                discriminator_value, variants[*variant_index].referenced_type_name
             ));
-            for (discriminator_value, variant_index) in arms.iter() {
-                content.push_str(&format!(
-                    "\t\t\t'{}' => !deep || {}.checkConform(json, deep: deep),\n",
-                    discriminator_value, variants[*variant_index].referenced_type_name
-                ));
-            }
-            content.push_str("\t\t\tdynamic _ => false,\n\t\t};\n\t}");
         }
+        content.push_str("\t\t\tdynamic _ => false,\n\t\t};\n\t}\n");
+        content.push_str(&conforms_member("toJson()", "\t"));
 
         content.push_str("\n}\n\n");
 
@@ -1064,25 +1088,24 @@ class BEAM{}Model implements BEAMSerde {{
             }
         ));
         content.push_str("  };\n");
-        if self.lazy {
-            // Conformance check for union discrimination: does `json` match a
-            // known value? `deep` is irrelevant for a leaf enum.
-            content.push_str("\n\tstatic bool checkConform(dynamic json, {bool deep = true}) => switch(json) {\n");
-            for (orig_value, _, is_string, _) in allowed_values_str.iter() {
-                content.push_str(&format!(
-                    "\t\t{} => true,\n",
-                    if *is_string {
-                        format!("'{}'", orig_value)
-                    } else {
-                        orig_value.to_string()
-                    }
-                ));
-            }
+        // Conformance check for union discrimination: does `json` match a
+        // known value? `deep` is irrelevant for a leaf enum.
+        content.push_str("\n\tstatic bool checkConform(dynamic json, {bool deep = true}) => switch(json) {\n");
+        for (orig_value, _, is_string, _) in allowed_values_str.iter() {
             content.push_str(&format!(
-                "\t\tdynamic _ => {},\n\t}};\n",
-                if allows_unspecified { "true" } else { "false" }
+                "\t\t{} => true,\n",
+                if *is_string {
+                    format!("'{}'", orig_value)
+                } else {
+                    orig_value.to_string()
+                }
             ));
         }
+        content.push_str(&format!(
+            "\t\tdynamic _ => {},\n\t}};\n",
+            if allows_unspecified { "true" } else { "false" }
+        ));
+        content.push_str(&conforms_member("toJson()", "\t"));
         content.push_str("}\n");
         EnumCode {
             class_name,
@@ -1298,6 +1321,25 @@ class BEAM{}Model implements BEAMSerde {{
         }
         content.push_str("\n\n");
 
+        // Static deep conformance check (used for lazy union discrimination
+        // and by the `conforms` instance check): does `json` structurally
+        // match this type, without throwing? Identical in every mode.
+        let mut product_check_conform = String::new();
+        product_check_conform
+            .push_str("\n  static bool checkConform(dynamic json, {bool deep = true}) {\n");
+        product_check_conform.push_str("    if (json is! Map<String, dynamic>) return false;\n");
+        if properties.is_empty() {
+            product_check_conform.push_str("    return true;\n");
+        } else {
+            let checks: Vec<String> = properties
+                .iter()
+                .map(|p| prop_conforms_expr(p, "json"))
+                .collect();
+            product_check_conform
+                .push_str(&format!("    return {};\n", checks.join("\n      && ")));
+        }
+        product_check_conform.push_str("  }\n");
+
         if self.lazy {
             // Map-backed lazy model: a single backing map is the source of
             // truth. Properties are getters that parse their slice on read,
@@ -1360,20 +1402,8 @@ class BEAM{}Model implements BEAMSerde {{
                     prop_from_json_expr(prop, raw_field),
                 ));
             }
-            // Static deep conformance check used for union discrimination:
-            // does `json` structurally match this type, without throwing?
-            content.push_str("\n  static bool checkConform(dynamic json, {bool deep = true}) {\n");
-            content.push_str("    if (json is! Map<String, dynamic>) return false;\n");
-            if properties.is_empty() {
-                content.push_str("    return true;\n");
-            } else {
-                let checks: Vec<String> = properties
-                    .iter()
-                    .map(|p| prop_conforms_expr(p, "json"))
-                    .collect();
-                content.push_str(&format!("    return {};\n", checks.join("\n      && ")));
-            }
-            content.push_str("  }\n");
+            content.push_str(&product_check_conform);
+            content.push_str(&conforms_member(raw_field, "  "));
             content.push_str("}\n");
         } else {
             content.push_str(&format!(
@@ -1442,6 +1472,8 @@ class BEAM{}Model implements BEAMSerde {{
                 ));
             }
             content.push_str("  );\n");
+            content.push_str(&product_check_conform);
+            content.push_str(&conforms_member("toJson()", "  "));
             content.push_str("}\n");
         }
         content.push_str(&extra_content);
@@ -1656,6 +1688,18 @@ fn prop_conforms_expr(prop: &Property, src: &str) -> String {
     } else {
         format!("({})", core)
     }
+}
+
+/// The `BEAMSerde.conforms` override every generated implementer carries:
+/// it runs the type's static `checkConform` against `raw`, the same raw JSON
+/// value its `toJson()` returns (the backing map for lazy models, `toJson()`
+/// otherwise). `indent` prefixes each emitted line.
+fn conforms_member(raw: &str, indent: &str) -> String {
+    format!(
+        "\n{i}@override\n{i}bool conforms({{bool deep = true}}) => checkConform({raw}, deep: deep);\n",
+        i = indent,
+        raw = raw
+    )
 }
 
 fn to_dart_prim(primitive: &intermediate::types::Primitive) -> String {

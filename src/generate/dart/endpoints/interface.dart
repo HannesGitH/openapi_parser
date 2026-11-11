@@ -11,6 +11,37 @@ abstract interface class JsonRequestHandler {
   BEAMCacheHandler? cache;
 }
 
+/// Optional hooks a [JsonRequestHandler] MAY mix in. Generated routes call
+/// them only when `handler is BeamHandlerHooks`; the defaults pass values
+/// through, so overriding one is opt-in per hook.
+///
+/// Both hooks are deliberately synchronous: [afterDecode] runs inside the
+/// route's `BEAMCachedResponse.then`, so an async hook would delay both the
+/// cached and the upstream value in the stream.
+///
+/// Each hook is called exactly once per request/decode, from the generated
+/// route itself — values produced by app code chaining further `.then`s on
+/// the returned [BEAMCachedResponse] never reach it.
+mixin class BeamHandlerHooks {
+  /// Called with the typed request body (before `toJson()`) of every
+  /// generated route method that takes a body. The returned value is what
+  /// gets serialized and sent.
+  T beforeRequest<T>({
+    required BEAMPathEnum path,
+    required BEAMRequestMethod method,
+    required T body,
+  }) => body;
+
+  /// Called with the fully decoded response value of every generated route
+  /// method, for both the cached and the upstream value. The returned value
+  /// is what the caller receives.
+  T afterDecode<T>({
+    required BEAMPathEnum path,
+    required BEAMRequestMethod method,
+    required T value,
+  }) => value;
+}
+
 /// A mutable out-parameter the request machinery passes down so a
 /// status-code-aware handler can report the HTTP status code of a response.
 ///
